@@ -52,6 +52,7 @@ def _build_mel_transform(device: torch.device) -> T.MelSpectrogram:
         n_fft=N_FFT,
         win_length=WIN_LENGTH,
         hop_length=HOP_LENGTH,
+        window_fn=torch.hann_window,
         f_min=MEL_FMIN,
         f_max=MEL_FMAX,
         n_mels=N_MELS,
@@ -204,7 +205,7 @@ def audio_samples_to_frames(n_samples: int) -> int:
     Returns:
         Number of frames.
     """
-    return n_samples // HOP_LENGTH
+    return n_samples // HOP_LENGTH + 1
 
 
 def frames_to_audio_samples(n_frames: int) -> int:
