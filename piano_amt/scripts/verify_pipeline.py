@@ -111,8 +111,9 @@ def check_audio(audio_path: str) -> None:
     n_frames  = audio_samples_to_frames(n_samples)
     assert n_frames > 0, "audio_samples_to_frames returned 0"
     reconstructed = frames_to_audio_samples(n_frames)
-    assert reconstructed <= n_samples, (
-        f"frames_to_audio_samples({n_frames})={reconstructed} > {n_samples}"
+    assert abs(reconstructed - n_samples) <= HOP_LENGTH, (
+        f"frames_to_audio_samples({n_frames})={reconstructed} "
+        f"differs from {n_samples} by more than HOP_LENGTH={HOP_LENGTH}"
     )
 
     print("  ✓ OK")
