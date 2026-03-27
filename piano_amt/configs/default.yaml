@@ -1,0 +1,108 @@
+# default.yaml — Piano AMT pipeline configuration
+# All values trace to Hawthorne et al. 2018a, jongwook/onsets-and-frames,
+# KinWaiCheuk/ICPR2020, and Kim et al. 2025 as documented in src/constants.py
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+maestro_root: "/content/drive/MyDrive/piano_amt/maestro-v3.0.0"
+# Root directory of the MAESTRO v3 dataset (contains *.csv and audio/MIDI files).
+# Change to local path when running outside Colab.
+
+cache_dir: "/content/drive/MyDrive/piano_amt/cache"
+# Directory where preprocessed NPZ files are stored.
+# Stored on Drive so cache survives Colab session restarts.
+
+checkpoint_dir: "/content/drive/MyDrive/piano_amt/checkpoints"
+# Directory for saved model checkpoints.
+
+# ---------------------------------------------------------------------------
+# Audio (Hawthorne 2018a §3 Table 1)
+# ---------------------------------------------------------------------------
+
+audio:
+  sample_rate: 16000          # Hz — Hawthorne 2018a §3
+  n_fft: 2048                 # FFT window size — jongwook src/constants.py
+  hop_length: 512             # Hop size → 31.25 fps — Hawthorne 2018a §3
+  win_length: 2048            # Window length — jongwook src/constants.py
+  n_mels: 229                 # Mel filterbank bins — Hawthorne 2018a §3
+  mel_fmin: 30.0              # Minimum mel frequency (Hz) — Hawthorne 2018a §3
+  mel_fmax: 8000.0            # Maximum mel frequency (Hz) — Hawthorne 2018a §3
+  log_offset: 1.0e-9          # log(mel + 1e-9) — jongwook src/mel.py
+
+# ---------------------------------------------------------------------------
+# Dataset (MAESTRO v3 — Hawthorne 2018b §3)
+# ---------------------------------------------------------------------------
+
+dataset:
+  min_midi: 21                # Lowest piano key MIDI note (A0)
+  max_midi: 108               # Highest piano key MIDI note (C8)
+  n_keys: 88                  # Total piano keys
+  onset_window_frames: 1      # Frames marked as onset — Hawthorne 2018a §3.1
+  offset_window_frames: 1     # Frames marked as offset — Kim et al. 2025
+  velocity_scale: 128.0       # Velocity normalisation — Hawthorne 2018a §3.1
+  max_segment_frames: 640     # Random crop length — jongwook src/dataset.py
+  max_segment_samples: 327680 # = 640 * 512 — jongwook src/dataset.py
+
+  # MAESTRO v3 CSV column names
+  audio_col: "audio_filename"
+  midi_col: "midi_filename"
+  split_col: "split"
+  duration_col: "duration"
+
+# ---------------------------------------------------------------------------
+# DataLoader (jongwook/onsets-and-frames training config)
+# ---------------------------------------------------------------------------
+
+dataloader:
+  batch_size: 8               # jongwook src/train.py: batch_size=8
+  num_workers: 2              # jongwook src/train.py: num_workers=2
+  pin_memory: true            # Pin tensors for CUDA transfer
+  seed: 42
+
+# ---------------------------------------------------------------------------
+# Augmentation (KinWaiCheuk/ICPR2020)
+# ---------------------------------------------------------------------------
+
+augmentation:
+  use_pitch_shift: true
+  pitch_shift_max_semitones: 1   # ±1 semitone — KinWaiCheuk/ICPR2020
+  pitch_shift_p: 0.5
+
+  use_time_mask: true
+  time_mask_max_frames: 50       # SpecAugment-style — KinWaiCheuk/ICPR2020
+  time_mask_p: 0.3
+
+  use_freq_mask: true
+  freq_mask_max_bins: 20         # SpecAugment-style — KinWaiCheuk/ICPR2020
+  freq_mask_p: 0.3
+
+  use_gain_jitter: true
+  gain_jitter_range: [-3.0, 3.0] # dB in log space
+  gain_jitter_p: 0.3
+
+# ---------------------------------------------------------------------------
+# Training (Hawthorne 2018a §3.2)
+# ---------------------------------------------------------------------------
+
+training:
+  epochs: 30
+  learning_rate: 6.0e-4       # Adam lr — Hawthorne 2018a §3.2
+  optimizer: "adam"           # Adam — Hawthorne 2018a §3.2
+  max_grad_norm: 3.0          # Gradient clip — Hawthorne 2018a §3.2
+  pos_weight: 5.0             # BCE positive weight for class imbalance
+  log_every_steps: 50
+
+  # Learning rate schedule
+  scheduler: "reduce_on_plateau"
+  scheduler_factor: 0.5
+  scheduler_patience: 3       # Halve LR after 3 epochs without improvement
+
+# ---------------------------------------------------------------------------
+# Checkpointing
+# ---------------------------------------------------------------------------
+
+checkpointing:
+  save_best_only: true        # Only save when val_loss improves
+  filename_template: "epoch_{epoch:03d}_valloss_{val_loss:.4f}.pt"
