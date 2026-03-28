@@ -88,7 +88,7 @@ def check_audio(audio_path: str) -> None:
         load_audio,
         wav_to_log_mel,
     )
-    from src.constants import N_MELS, SAMPLE_RATE
+    from src.constants import N_MELS, SAMPLE_RATE, HOP_LENGTH
 
     # Load
     waveform, sr = load_audio(audio_path, target_sr=SAMPLE_RATE, mono=True)
