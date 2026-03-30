@@ -71,8 +71,7 @@ Using 1 here to stay consistent with jongwook reference implementation."""
 
 OFFSET_WINDOW_FRAMES: int = 1
 """Number of frames to mark around the true offset frame.
-Included explicitly so the D3RM refiner (Kim et al. 2025 §3) has a clean target.
-Kim, Kwon & Nam 2025 "D3RM" arxiv 2501.05068: offset errors are primary target."""
+Included to match jongwook/onsets-and-frames offset head improvement."""
 
 VELOCITY_SCALE: float = 128.0
 """Normalise raw MIDI velocity [0,127] → [0,1] by dividing by 128.

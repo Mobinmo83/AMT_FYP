@@ -126,8 +126,10 @@ def evaluate_file(
     # Error analysis
     ea = compute_error_analysis(
         pred_onset=pred_onset,
+        pred_frame=pred_frame,
         pred_offset=pred_offset,
         gt_onset=gt_onset,
+        gt_frame=gt_frame,
         gt_offset=gt_offset,
         onset_threshold=onset_threshold,
         fps=FRAMES_PER_SECOND,
@@ -232,7 +234,7 @@ def run_evaluation(
         print(
             f"      onset_f1={scalars.get('onset_f1',0):.3f}  "
             f"frame_f1={scalars.get('frame_f1',0):.3f}  "
-            f"offset_f1={scalars.get('offset_f1',0):.3f}"
+            f"note+off_f1={scalars.get('note_with_offset_f1',0):.3f}"
         )
 
         # Optional: save plots
@@ -281,7 +283,7 @@ def run_evaluation(
     print(f"\n{'='*50}")
     print(f"SUMMARY ({split}, n={summary['n_files']})")
     print(f"{'='*50}")
-    for k in ["onset_f1", "frame_f1", "offset_f1", "note_with_offset_f1"]:
+    for k in ["onset_f1", "frame_f1", "note_with_offset_f1", "note_with_offset_vel_f1"]:
         print(f"  {k:30s}: {summary.get(k, 0):.4f}")
     print(f"\nResults saved → {eval_dir}")
 

@@ -40,6 +40,7 @@ import torch
 # Optional mir_eval — raises a clear error if missing
 try:
     import mir_eval
+    from mir_eval.transcription_velocity import precision_recall_f1_overlap as evaluate_notes_with_velocity
     _MIR_EVAL_AVAILABLE = True
 except ImportError:
     _MIR_EVAL_AVAILABLE = False
@@ -228,19 +229,19 @@ def compute_note_metrics(
     results["note_with_offset_recall"]    = float(r)
     results["note_with_offset_f1"]        = float(f)
 
-    # Tier 3: onset + offset + velocity
-    p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
+    # Tier 3: onset + offset + velocity (uses separate mir_eval function)
+    p, r, f, _ = evaluate_notes_with_velocity(
         ref_intervals=gt_intervals,
         ref_pitches=gt_pitches,
+        ref_velocities=gt_vels,
         est_intervals=pred_intervals,
         est_pitches=pred_pitches,
+        est_velocities=pred_vels,
         onset_tolerance=0.05,
         pitch_tolerance=0.25,
         offset_ratio=0.2,
         offset_min_tolerance=0.05,
         velocity_tolerance=0.1,
-        ref_velocities=gt_vels,
-        est_velocities=pred_vels,
     )
     results["note_with_offset_vel_precision"] = float(p)
     results["note_with_offset_vel_recall"]    = float(r)

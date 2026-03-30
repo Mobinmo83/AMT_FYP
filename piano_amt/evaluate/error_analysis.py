@@ -2,7 +2,7 @@
 evaluate/error_analysis.py — Targeted error analysis beyond standard F1.
 
 Computes metrics specifically relevant for:
-  - Understanding what errors the D3RM refiner should fix (offset jitter)
+  - Understanding offset timing errors (offset jitter)
   - Chord completeness (important for the reconstruction phase)
   - Duplicate onset detection (common failure mode)
 
@@ -20,15 +20,14 @@ Three metrics:
   3. offset_mae_ms:
        Mean absolute error (milliseconds) between predicted and ground-truth
        note offsets, for notes where the onset was correctly detected.
-       This is the primary target metric for D3RM refinement.
+       This measures offset timing accuracy.
 
   4. onset_mae_ms:
        Mean absolute error (milliseconds) for correctly matched onsets.
        Baseline reference.
 
 Papers:
-  Kim, Kwon & Nam 2025 "D3RM" §3: offset errors are the primary target.
-  Hawthorne 2018a §4: chord/note evaluation context.
+  Hawthorne 2018a §4: note evaluation context.
 """
 
 from __future__ import annotations
@@ -203,8 +202,10 @@ def compute_chord_completeness(
 
 def compute_offset_mae(
     pred_onset:  torch.Tensor,  # (T, 88)
+    pred_frame:  torch.Tensor,  # (T, 88)
     pred_offset: torch.Tensor,  # (T, 88)
     gt_onset:    torch.Tensor,  # (T, 88)
+    gt_frame:    torch.Tensor,  # (T, 88)
     gt_offset:   torch.Tensor,  # (T, 88)
     fps:         float,
     onset_threshold:  float = 0.5,
@@ -233,7 +234,7 @@ def compute_offset_mae(
 
     pred_events = rolls_to_note_events(
         onset_roll=pred_onset,
-        frame_roll=pred_onset,
+        frame_roll=pred_frame,
         velocity_roll=torch.zeros_like(pred_onset),
         fps=fps,
         onset_threshold=onset_threshold,
@@ -241,7 +242,7 @@ def compute_offset_mae(
     )
     gt_events = rolls_to_note_events(
         onset_roll=gt_onset,
-        frame_roll=gt_onset,
+        frame_roll=gt_frame,
         velocity_roll=torch.zeros_like(gt_onset),
         fps=fps,
         onset_threshold=0.5,
@@ -279,8 +280,10 @@ def compute_offset_mae(
 
 def compute_error_analysis(
     pred_onset:       torch.Tensor,
+    pred_frame:       torch.Tensor,
     pred_offset:      torch.Tensor,
     gt_onset:         torch.Tensor,
+    gt_frame:         torch.Tensor,
     gt_offset:        torch.Tensor,
     fps:              float,
     onset_threshold:  float = 0.5,
@@ -293,7 +296,7 @@ def compute_error_analysis(
           duplicate_note_rate   — [0,1]
           chord_completeness    — [0,1]
           onset_mae_ms          — float
-          offset_mae_ms         — float  ← primary D3RM target
+          offset_mae_ms         — float  ← offset timing accuracy
     """
     dup_rate = compute_duplicate_note_rate(
         pred_onset=pred_onset, fps=fps, threshold=onset_threshold
@@ -304,8 +307,10 @@ def compute_error_analysis(
     )
     onset_mae, offset_mae = compute_offset_mae(
         pred_onset=pred_onset,
+        pred_frame=pred_frame,
         pred_offset=pred_offset,
         gt_onset=gt_onset,
+        gt_frame=gt_frame,
         gt_offset=gt_offset,
         fps=fps,
         onset_threshold=onset_threshold,

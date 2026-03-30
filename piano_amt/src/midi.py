@@ -5,14 +5,14 @@ Design follows Hawthorne et al. 2018a §3.1 "Label Design":
   - onset_roll:    1.0 for ONSET_WINDOW_FRAMES around each note onset.
   - frame_roll:    1.0 for every frame the note is sounding.
   - offset_roll:   1.0 for OFFSET_WINDOW_FRAMES around each note offset.
-                   (Included now so D3RM refiner, Kim et al. 2025, has a clean target.)
+                   (jongwook/onsets-and-frames offset head improvement.)
   - velocity_roll: velocity/128 at the onset frame only.
 
 All rolls have shape (n_frames, 88) where dim-1 indexes piano keys [21..108].
 
 Papers:
   Hawthorne et al. 2018a §3.1 — label encoding scheme.
-  Kim, Kwon & Nam 2025 "D3RM" arxiv 2501.05068 — offset head justification.
+  jongwook/onsets-and-frames — offset head improvement.
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ def note_events_to_rolls(
 
     Papers:
         Hawthorne 2018a §3.1: onset/frame/velocity encoding.
-        Kim et al. 2025 "D3RM" arxiv 2501.05068: offset head as refiner target.
+        jongwook/onsets-and-frames: offset head improvement.
     """
     onset_roll    = torch.zeros(n_frames, N_KEYS, dtype=torch.float32)
     frame_roll    = torch.zeros(n_frames, N_KEYS, dtype=torch.float32)
