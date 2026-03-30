@@ -395,7 +395,7 @@ class Trainer:
         self.criterion  = OnsetsFramesLoss(pos_weight=pos_weight)
         self.optimizer  = Adam(model.parameters(), lr=lr)
         self.scheduler  = ReduceLROnPlateau(
-            self.optimizer, mode="min", factor=0.5, patience=3, verbose=True
+            self.optimizer, mode="min", factor=0.5, patience=3
         )
 
         self.train_loader   = train_loader

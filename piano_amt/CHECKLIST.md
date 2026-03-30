@@ -114,8 +114,8 @@ piano_amt/
 | Notebook | Purpose | When to run |
 |----------|---------|------------|
 | dataset_setup_install_download_cache_verify.ipynb | GPU check, Drive mount, install, clone, download MAESTRO, build NPZ cache, verify pipeline (5 checks) | Data pipeline: once for download/cache, verify section every session |
-| 05_train_onsets_frames.ipynb | Model training with staged scaling (smoke→tiny→small→medium→full), evaluation, comparison, MIDI demo | Every training session |
-| data_exploring.ipynb | Data exploration: mel spectrograms, piano rolls, alignment checks, dataset statistics | Optional — for inspection and report figures |
+| train_onsets_frames.ipynb | Model training with staged scaling (smoke→tiny→small→medium→full), evaluation, comparison, MIDI demo | Every training session |
+| data_exploring_verification.ipynb | Data exploration: mel spectrograms, piano rolls, alignment checks, dataset statistics | Optional — for inspection and report figures |
 
 ---
 
