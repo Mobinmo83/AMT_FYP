@@ -3,17 +3,17 @@ models/onsets_frames/train.py — Training harness for OnsetsAndFrames.
 
 Design:
   - Every run gets its own directory under runs/<run_name>/
-    containing: checkpoints/, plots/, metrics.json, config.json
+    containing: checkpoints/, plots/, metrics.json, config.json, timing_summary.json
   - Loss curves (train + val per epoch) are saved as PNG after every epoch
     so training progress is always visible for the report.
-  - All epoch losses are stored in metrics.json and updated after every epoch
-    so the file is always up-to-date even if Colab disconnects.
+  - All epoch losses + timing data are stored in metrics.json and updated after
+    every epoch so the file is always up-to-date even if Colab disconnects.
   - The model uses post-sigmoid outputs, so BCELoss is used (not BCEWithLogits).
   - Per-parameter gradient clipping matches jongwook's implementation.
   - ReduceLROnPlateau scheduler halves LR after 3 epochs without improvement.
   - EVERY epoch is checkpointed (latest.pt + best.pt) for Colab crash safety.
   - Full resume support: model, optimizer, scheduler, epoch, best_val_loss,
-    global_step, and metrics history are all restored.
+    global_step, timing history, and metrics history are all restored.
 
 Usage (CLI):
     python -m models.onsets_frames.train \\
@@ -97,8 +97,6 @@ class OnsetsFramesLoss(nn.Module):
 
     def _bce(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Weighted BCE: pos_weight on positive class."""
-        # Manual weighted BCE so we can apply a scalar pos_weight
-        # without registering a buffer every forward call.
         loss = -(
             self.pos_weight * target * torch.log(pred.clamp(min=1e-7))
             + (1.0 - target) * torch.log((1.0 - pred).clamp(min=1e-7))
@@ -110,20 +108,6 @@ class OnsetsFramesLoss(nn.Module):
         pred:   Dict[str, torch.Tensor],
         target: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
-        """
-        Args:
-            pred:   Dict with "onset","frame","offset","velocity" — each (B,T,88)
-                    Values are post-sigmoid probabilities [0,1].
-            target: Dict with same keys — ground truth labels in [0,1].
-
-        Returns:
-            Dict with:
-              "total"    — differentiable scalar sum of all head losses
-              "onset"    — float (for logging)
-              "frame"    — float
-              "offset"   — float
-              "velocity" — float
-        """
         loss_onset  = self._bce(pred["onset"],  target["onset"])
         loss_frame  = self._bce(pred["frame"],  target["frame"])
         loss_offset = self._bce(pred["offset"], target["offset"])
@@ -131,7 +115,7 @@ class OnsetsFramesLoss(nn.Module):
         # Velocity: masked MSE at onset positions only
         mask     = (target["onset"] > 0.5).float()
         n_active = mask.sum().clamp(min=1.0)
-        vel_mse  = self.mse(pred["velocity"], target["velocity"])  # (B,T,88)
+        vel_mse  = self.mse(pred["velocity"], target["velocity"])
         loss_vel = (vel_mse * mask).sum() / n_active
 
         total = loss_onset + loss_frame + loss_offset + loss_vel
@@ -158,6 +142,7 @@ class RunDirectory:
             checkpoints/      ← .pt files (latest.pt + best.pt + per-epoch)
             plots/            ← PNG loss curves saved every epoch
             metrics.json      ← updated after every epoch (survives resume)
+            timing_summary.json ← timing statistics (updated after training)
             config.json       ← saved once at run start
     """
 
@@ -171,6 +156,7 @@ class RunDirectory:
         self.plots.mkdir(exist_ok=True)
 
         self.metrics_path = self.root / "metrics.json"
+        self.timing_path  = self.root / "timing_summary.json"
         self.config_path  = self.root / "config.json"
 
         # Load existing history if resuming, otherwise start fresh
@@ -186,12 +172,12 @@ class RunDirectory:
                 "train_onset":  [], "train_frame":  [], "train_offset":  [], "train_vel":  [],
                 "val_onset":    [], "val_frame":    [], "val_offset":    [], "val_vel":    [],
                 "lr":         [],
+                "epoch_time_seconds": [],
             }
 
     def save_config(self, cfg: dict) -> None:
         with open(self.config_path, "w") as f:
             json.dump(cfg, f, indent=2)
-        print(f"  Config saved → {self.config_path}")
 
     def log_epoch(
         self,
@@ -199,6 +185,7 @@ class RunDirectory:
         train_losses: Dict[str, float],
         val_losses:   Dict[str, float],
         lr: float,
+        epoch_time: float,
     ) -> None:
         """Append one epoch to history and flush to metrics.json."""
         h = self._history
@@ -214,8 +201,32 @@ class RunDirectory:
         h["val_offset"].append(val_losses["offset"])
         h["val_vel"].append(val_losses["velocity"])
         h["lr"].append(lr)
+        h["epoch_time_seconds"].append(epoch_time)
         with open(self.metrics_path, "w") as f:
             json.dump(h, f, indent=2)
+
+    def save_timing_summary(self, total_training_time: float) -> None:
+        """Save comprehensive timing statistics to timing_summary.json."""
+        h = self._history
+        epoch_times = h.get("epoch_time_seconds", [])
+
+        if not epoch_times:
+            return
+
+        summary = {
+            "total_training_time_hours": total_training_time / 3600,
+            "total_training_time_seconds": total_training_time,
+            "total_epochs_trained": len(epoch_times),
+            "mean_epoch_time_seconds": sum(epoch_times) / len(epoch_times),
+            "min_epoch_time_seconds": min(epoch_times),
+            "max_epoch_time_seconds": max(epoch_times),
+            "first_epoch_time_seconds": epoch_times[0] if epoch_times else 0,
+            "last_epoch_time_seconds": epoch_times[-1] if epoch_times else 0,
+            "per_epoch_times_seconds": epoch_times,
+        }
+
+        with open(self.timing_path, "w") as f:
+            json.dump(summary, f, indent=2)
 
     def save_loss_curves(self, epoch: int) -> None:
         """Save total + per-head loss curves as PNG. Called after every epoch."""
@@ -264,7 +275,6 @@ class RunDirectory:
         out_path = self.plots / f"loss_curves_epoch{epoch:03d}.png"
         plt.savefig(out_path, dpi=120, bbox_inches="tight")
         plt.close(fig)
-        print(f"  Loss curve saved → {out_path}")
 
     def checkpoint_path(self, epoch: int, val_loss: float) -> Path:
         return self.checkpoints / f"epoch_{epoch:03d}_valloss_{val_loss:.4f}.pt"
@@ -283,33 +293,25 @@ class RunDirectory:
 class Trainer:
     """
     Full training loop with per-epoch logging, loss-curve saving,
-    and Drive-safe checkpointing.
+    timing instrumentation, and Drive-safe checkpointing.
 
     GPU performance features:
-      - cuDNN benchmark mode (auto-tunes conv algorithms for fixed input sizes)
-      - Automatic Mixed Precision (AMP) with GradScaler for ~1.5–2× speedup
-      - torch.compile() on PyTorch 2.0+ for kernel fusion
+      - cuDNN benchmark mode
+      - Automatic Mixed Precision (AMP) with GradScaler
+      - torch.compile() on PyTorch 2.0+
       - Non-blocking CPU→GPU transfers with pin_memory
-      - set_to_none=True for zero_grad (avoids memset)
-      - tf32 on Ampere+ GPUs (A100/H100) for ~3× faster matmul
+      - set_to_none=True for zero_grad
+      - tf32 on Ampere+ GPUs
 
     Checkpointing strategy (Colab crash-safe):
       - latest.pt  — saved EVERY epoch (always resumable)
       - best.pt    — saved when val_loss improves (best model for eval)
       - epoch_NNN_valloss_X.XXXX.pt — kept for each best (audit trail)
 
-    Args:
-        model:        OnsetsAndFrames (or any compatible nn.Module).
-        train_loader: DataLoader for training split.
-        val_loader:   DataLoader for validation split.
-        device:       torch.device.
-        run_dir:      RunDirectory instance managing output paths.
-        lr:           Adam learning rate (default 6e-4 — Hawthorne 2018a §3.2).
-        pos_weight:   BCE positive class weight (default 5.0).
-        max_grad_norm: Per-parameter gradient clip norm (default 3.0).
-        log_every:    Print per-step log every N global steps.
-        use_amp:      Enable automatic mixed precision (default True for CUDA).
-        use_compile:  Enable torch.compile (default True for PyTorch 2.0+).
+    Timing:
+      - epoch_time_seconds saved per epoch in metrics.json
+      - total_training_time_hours saved in timing_summary.json
+      - All timing data saved in checkpoints for resume support
     """
 
     def __init__(
@@ -335,45 +337,26 @@ class Trainer:
         # GPU performance setup
         # ------------------------------------------------------------------
         if device.type == "cuda":
-            # cuDNN benchmark: auto-selects fastest conv algorithm for fixed
-            # input sizes (our mel is always B×229×640 during training).
-            # First batch is ~10% slower (benchmarking), all subsequent are faster.
             torch.backends.cudnn.benchmark = True
-            print(f"  cuDNN benchmark: enabled")
 
-            # TF32 on Ampere+ GPUs (A100, H100): 3× faster matmul/conv
-            # with negligible precision loss. No effect on T4 (Turing arch).
-            if torch.cuda.get_device_capability(0)[0] >= 8:  # Ampere = 8.x
+            if torch.cuda.get_device_capability(0)[0] >= 8:
                 torch.backends.cuda.matmul.allow_tf32 = True
                 torch.backends.cudnn.allow_tf32 = True
-                print(f"  TF32: enabled (Ampere+ GPU detected)")
-            else:
-                print(f"  TF32: not available (GPU compute capability "
-                      f"{torch.cuda.get_device_capability(0)})")
 
         # Move model to device
         self.model = model.to(device)
 
         # ------------------------------------------------------------------
         # AMP (Automatic Mixed Precision)
-        # Runs forward pass in float16 (2× less VRAM, faster compute),
-        # keeps master weights in float32 for stability.
-        # GradScaler prevents float16 underflow during backward.
-        # Safe for all our ops: Conv2d, LSTM, Linear, Sigmoid, BCE, MSE.
-        # BatchNorm auto-stays fp32 under autocast.
         # ------------------------------------------------------------------
         self.use_amp = use_amp and (device.type == "cuda")
         if self.use_amp:
             self.scaler = torch.amp.GradScaler("cuda")
-            print(f"  AMP: enabled (float16 forward, float32 weights)")
         else:
             self.scaler = None
-            print(f"  AMP: disabled")
 
         # ------------------------------------------------------------------
         # torch.compile (PyTorch 2.0+)
-        # Fuses ops, eliminates Python overhead, reduces kernel launches.
-        # ~10-30% faster after warmup. Falls back gracefully if unsupported.
         # ------------------------------------------------------------------
         self.used_compile = False
         if use_compile and device.type == "cuda":
@@ -382,12 +365,8 @@ class Trainer:
                 try:
                     self.model = torch.compile(self.model)
                     self.used_compile = True
-                    print(f"  torch.compile: enabled (kernel fusion)")
-                except Exception as e:
-                    print(f"  torch.compile: failed ({e}), continuing without")
-            else:
-                print(f"  torch.compile: requires PyTorch 2.0+ "
-                      f"(have {torch.__version__})")
+                except Exception:
+                    pass
 
         # ------------------------------------------------------------------
         # Optimizer, scheduler, loss
@@ -402,12 +381,11 @@ class Trainer:
         self.val_loader     = val_loader
         self.global_step    = 0
         self.best_val_loss: float = float("inf")
+        self.cumulative_training_time: float = 0.0  # total seconds across all sessions
 
     # -----------------------------------------------------------------------
 
     def _move(self, batch: dict) -> dict:
-        """Transfer batch tensors to GPU with non-blocking async copy.
-        Works with pin_memory=True in DataLoader for overlap."""
         return {
             k: v.to(self.device, non_blocking=True) if isinstance(v, torch.Tensor) else v
             for k, v in batch.items()
@@ -416,14 +394,6 @@ class Trainer:
     # -----------------------------------------------------------------------
 
     def _per_param_clip(self) -> None:
-        """
-        Per-parameter gradient clipping — jongwook improvement.
-        Each parameter's gradient norm is clipped independently to max_grad_norm.
-        This is stricter than global norm clipping and stabilises the large model.
-
-        When using AMP, gradients have already been unscaled by scaler.unscale_()
-        before this is called, so clipping operates on the true gradient magnitudes.
-        """
         for p in self.model.parameters():
             if p.grad is not None:
                 nn.utils.clip_grad_norm_([p], max_norm=self.max_grad_norm)
@@ -431,13 +401,6 @@ class Trainer:
     # -----------------------------------------------------------------------
 
     def train_epoch(self, epoch: int) -> Dict[str, float]:
-        """
-        One full pass over train_loader with AMP support.
-
-        Returns:
-            Dict with keys "total","onset","frame","offset","velocity"
-            — mean values over the epoch.
-        """
         self.model.train()
         totals: Dict[str, float] = {
             "total": 0., "onset": 0., "frame": 0., "offset": 0., "velocity": 0.
@@ -448,21 +411,16 @@ class Trainer:
         for batch in self.train_loader:
             batch = self._move(batch)
 
-            # --- Forward pass (possibly in float16 under AMP) ---
             with torch.amp.autocast("cuda", enabled=self.use_amp):
                 pred   = self.model(batch["mel"])
                 losses = self.criterion(pred, batch)
 
-            # --- Backward pass ---
             self.optimizer.zero_grad(set_to_none=True)
 
             if self.use_amp:
-                # Scale loss to prevent float16 gradient underflow
                 self.scaler.scale(losses["total"]).backward()
-                # Unscale gradients BEFORE clipping so clip thresholds are correct
                 self.scaler.unscale_(self.optimizer)
                 self._per_param_clip()
-                # Step optimizer (skips step if gradients contained inf/nan)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
@@ -494,7 +452,6 @@ class Trainer:
     # -----------------------------------------------------------------------
 
     def validate(self, epoch: int) -> Dict[str, float]:
-        """One full pass over val_loader with AMP. Calls scheduler.step()."""
         self.model.eval()
         totals: Dict[str, float] = {
             "total": 0., "onset": 0., "frame": 0., "offset": 0., "velocity": 0.
@@ -519,23 +476,6 @@ class Trainer:
     # -----------------------------------------------------------------------
 
     def save_checkpoint(self, epoch: int, val_loss: float, is_best: bool) -> None:
-        """
-        Save checkpoint to Drive.
-
-        Always saves latest.pt (for resume after disconnect).
-        If is_best, also saves best.pt and a named epoch checkpoint.
-
-        Checkpoint contents:
-          model_state     — nn.Module state dict (weights, always fp32)
-          optimizer_state — Adam state (momentum buffers, step counts)
-          scheduler_state — ReduceLROnPlateau state (num_bad_epochs, etc.)
-          scaler_state    — AMP GradScaler state (scale factor, growth tracker)
-          epoch           — int, last completed epoch
-          val_loss        — float, validation loss at this epoch
-          global_step     — int, total training steps completed
-          best_val_loss   — float, best val loss seen so far
-          use_amp         — bool, whether AMP was used (for resume compatibility)
-        """
         # If model was torch.compile'd, get the underlying module's state_dict
         model_to_save = self.model
         if hasattr(self.model, '_orig_mod'):
@@ -550,85 +490,115 @@ class Trainer:
             "global_step":     self.global_step,
             "best_val_loss":   self.best_val_loss,
             "use_amp":         self.use_amp,
+            "cumulative_training_time": self.cumulative_training_time,
         }
 
-        # Save AMP scaler state for proper resume
         if self.scaler is not None:
             ckpt["scaler_state"] = self.scaler.state_dict()
 
-        # Always save latest.pt — the crash-safety net
+        # Always save latest.pt
         latest_path = self.run_dir.latest_checkpoint_path()
         torch.save(ckpt, latest_path)
-        print(f"  latest.pt saved → {latest_path}")
+
+        if epoch % 5 == 0:
+            periodic_path = self.run_dir.checkpoints / f"epoch_{epoch:03d}.pt"
+            torch.save(ckpt, periodic_path)
 
         if is_best:
-            # Save named checkpoint for audit trail
             named_path = self.run_dir.checkpoint_path(epoch, val_loss)
             torch.save(ckpt, named_path)
-
-            # Overwrite best.pt
             best_path = self.run_dir.best_checkpoint_path()
             torch.save(ckpt, best_path)
-            print(f"  best.pt updated → {best_path}")
-            print(f"  Named checkpoint → {named_path}")
 
     # -----------------------------------------------------------------------
 
     def fit(self, epochs: int = 30, start_epoch: int = 1) -> None:
-        """
-        Full training loop: train → validate → log → checkpoint → plot.
-
-        Args:
-            epochs:      Total epochs to train (absolute, not additional).
-            start_epoch: First epoch number (>1 when resuming).
-        """
         print(f"\n{'='*60}")
         print(f"Starting training: epochs {start_epoch}→{epochs}")
         print(f"Run directory: {self.run_dir.root}")
         print(f"Best val loss so far: {self.best_val_loss:.4f}")
-        print(f"Global step: {self.global_step}")
+        print(f"Cumulative training time: {self.cumulative_training_time:.1f}s")
         print(f"{'='*60}\n")
 
+        session_start_time = time.time()
+        best_epoch = None
+
         for epoch in range(start_epoch, epochs + 1):
-            print(f"\n--- Epoch {epoch}/{epochs} ---")
-            t_epoch = time.time()
+            t_epoch_start = time.time()
+
+            print(f"--- Epoch {epoch}/{epochs} ---")
 
             train_losses = self.train_epoch(epoch)
             val_losses   = self.validate(epoch)
             current_lr   = self.optimizer.param_groups[0]["lr"]
 
-            # Log to metrics.json (flushed to Drive immediately)
-            self.run_dir.log_epoch(epoch, train_losses, val_losses, current_lr)
+            epoch_time = time.time() - t_epoch_start
+            self.cumulative_training_time += epoch_time
 
-            elapsed = time.time() - t_epoch
-            print(
-                f"  train_loss={train_losses['total']:.4f}  "
-                f"val_loss={val_losses['total']:.4f}  "
-                f"lr={current_lr:.2e}  "
-                f"({elapsed:.0f}s)"
-            )
-
-            # Save loss curves PNG every epoch
-            self.run_dir.save_loss_curves(epoch)
+            # Log to metrics.json
+            self.run_dir.log_epoch(epoch, train_losses, val_losses, current_lr, epoch_time)
 
             # Determine if this is a new best
             is_best = val_losses["total"] < self.best_val_loss
             if is_best:
                 self.best_val_loss = val_losses["total"]
-                print(f"  *** New best val loss: {val_losses['total']:.4f} ***")
+                best_epoch = epoch
 
-            # Save checkpoint EVERY epoch (latest.pt always, best.pt if improved)
+            # Save loss curves PNG
+            self.run_dir.save_loss_curves(epoch)
+
+            # Save checkpoint
             self.save_checkpoint(epoch, val_losses["total"], is_best=is_best)
 
-            # Estimate time remaining
+            # Concise per-epoch output
+            best_marker = " ★ NEW BEST" if is_best else ""
             epochs_left = epochs - epoch
-            if epochs_left > 0:
-                eta_min = (elapsed * epochs_left) / 60
-                print(f"  ETA: ~{eta_min:.0f} min ({epochs_left} epochs left)")
+            eta_str = f"  ETA: ~{(epoch_time * epochs_left) / 60:.0f}min" if epochs_left > 0 else ""
+            print(
+                f"  train={train_losses['total']:.4f}  val={val_losses['total']:.4f}  "
+                f"lr={current_lr:.2e}  time={epoch_time:.0f}s{eta_str}{best_marker}\n"
+            )
+
+        # --- End of training: comprehensive summary ---
+        total_session_time = time.time() - session_start_time
+        self.run_dir.save_timing_summary(self.cumulative_training_time)
 
         print(f"\n{'='*60}")
-        print(f"Training complete. Best val loss: {self.best_val_loss:.4f}")
-        print(f"All outputs in: {self.run_dir.root}")
+        print(f"  TRAINING COMPLETE")
+        print(f"{'='*60}")
+        print(f"  Run directory     : {self.run_dir.root}")
+        print(f"  Epochs trained    : {start_epoch}→{epochs} ({epochs - start_epoch + 1} epochs)")
+        print(f"  Best val loss     : {self.best_val_loss:.4f}" +
+              (f" (epoch {best_epoch})" if best_epoch else ""))
+        print(f"  Session time      : {total_session_time / 60:.1f} min")
+        print(f"  Total train time  : {self.cumulative_training_time / 3600:.2f} hours")
+        print()
+
+        # Verify saved files
+        print(f"  Saved files:")
+        for label, path in [
+            ("Config",           self.run_dir.config_path),
+            ("Metrics",          self.run_dir.metrics_path),
+            ("Timing summary",   self.run_dir.timing_path),
+            ("Latest checkpoint", self.run_dir.latest_checkpoint_path()),
+            ("Best checkpoint",  self.run_dir.best_checkpoint_path()),
+        ]:
+            exists = path.exists()
+            status = "✓" if exists else "✗ MISSING"
+            print(f"    {status} {label}: {path}")
+
+        # List all epoch checkpoints
+        epoch_ckpts = sorted(self.run_dir.checkpoints.glob("epoch_*.pt"))
+        if epoch_ckpts:
+            print(f"    ✓ Epoch checkpoints ({len(epoch_ckpts)}):")
+            for ck in epoch_ckpts:
+                print(f"      - {ck.name}")
+
+        # List loss curve plots
+        plots = sorted(self.run_dir.plots.glob("loss_curves_*.png"))
+        if plots:
+            print(f"    ✓ Loss curve plots ({len(plots)}) saved in: {self.run_dir.plots}")
+
         print(f"{'='*60}")
 
 
@@ -671,31 +641,11 @@ def main() -> None:
         gpu_name = torch.cuda.get_device_name(0)
         gpu_mem  = torch.cuda.get_device_properties(0).total_mem / (1024**3)
         compute  = torch.cuda.get_device_capability(0)
-        print(f"GPU:    {gpu_name}")
-        print(f"VRAM:   {gpu_mem:.1f} GB")
-        print(f"Compute capability: {compute[0]}.{compute[1]}")
-        if compute[0] >= 8:
-            print(f"Architecture: Ampere+ (TF32 + BF16 available)")
-        elif compute[0] >= 7:
-            if compute[1] >= 5:
-                print(f"Architecture: Turing (FP16 AMP available)")
-            else:
-                print(f"Architecture: Volta (FP16 AMP available)")
-        # Recommended batch sizes
-        if gpu_mem >= 70:
-            rec_bs = "16–32"
-        elif gpu_mem >= 35:
-            rec_bs = "16"
-        elif gpu_mem >= 14:
-            rec_bs = "8"
-        else:
-            rec_bs = "4"
-        print(f"Recommended batch_size: {rec_bs}")
+        print(f"GPU: {gpu_name} | VRAM: {gpu_mem:.1f} GB | Compute: {compute[0]}.{compute[1]}")
 
-    # Default runs_dir to Drive (NOT local /content/ which is wiped on disconnect)
+    # Default runs_dir to Drive
     if args.runs_dir is None:
         args.runs_dir = str(Path(args.maestro_root).parent / "runs")
-        print(f"  runs_dir defaulting to: {args.runs_dir}")
 
     # Run directory
     run_dir = RunDirectory(args.runs_dir, args.run_name)
@@ -722,15 +672,13 @@ def main() -> None:
         use_augmentation=False,
         pin_memory=(device.type == "cuda"),
     )
-    print(f"Train batches : {len(train_loader)}")
-    print(f"Val batches   : {len(val_loader)}")
+    print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
     # Model
     model = OnsetsAndFrames(model_complexity=args.model_complexity)
-    print(f"\nModel: OnsetsAndFrames  complexity={args.model_complexity}")
-    print(f"Parameters: {model.count_parameters():,}")
+    print(f"Model: OnsetsAndFrames (complexity={args.model_complexity}, params={model.count_parameters():,})")
 
-    # Trainer (before resume so we can restore optimizer/scheduler into it)
+    # Trainer
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
@@ -745,7 +693,7 @@ def main() -> None:
         use_compile=not args.no_compile,
     )
 
-    # Resume from checkpoint — restore EVERYTHING
+    # Resume from checkpoint
     start_epoch = 1
     if args.resume:
         ckpt_path = Path(args.resume)
@@ -756,37 +704,27 @@ def main() -> None:
             print(f"\nResuming from: {ckpt_path}")
             ckpt = torch.load(str(ckpt_path), map_location=device)
 
-            # Restore model weights (handle torch.compile wrapper)
             model_to_load = trainer.model
             if hasattr(trainer.model, '_orig_mod'):
                 model_to_load = trainer.model._orig_mod
             model_to_load.load_state_dict(ckpt["model_state"])
 
-            # Restore optimizer state (momentum buffers, step counts)
             if "optimizer_state" in ckpt:
                 trainer.optimizer.load_state_dict(ckpt["optimizer_state"])
-                print("  Restored optimizer state (momentum, step counts)")
-
-            # Restore scheduler state (num_bad_epochs, best, etc.)
             if "scheduler_state" in ckpt:
                 trainer.scheduler.load_state_dict(ckpt["scheduler_state"])
-                print("  Restored scheduler state (patience counter, best)")
-
-            # Restore AMP scaler state (scale factor, growth tracker)
             if "scaler_state" in ckpt and trainer.scaler is not None:
                 trainer.scaler.load_state_dict(ckpt["scaler_state"])
-                print("  Restored AMP scaler state")
 
-            # Restore training position
             start_epoch = ckpt["epoch"] + 1
             trainer.global_step = ckpt.get("global_step", 0)
             trainer.best_val_loss = ckpt.get("best_val_loss",
                                               ckpt.get("val_loss", float("inf")))
+            trainer.cumulative_training_time = ckpt.get("cumulative_training_time", 0.0)
 
-            print(f"  Resuming at epoch {start_epoch}")
-            print(f"  Global step: {trainer.global_step}")
-            print(f"  Best val loss: {trainer.best_val_loss:.4f}")
-            print(f"  Current LR: {trainer.optimizer.param_groups[0]['lr']:.2e}")
+            print(f"  Epoch: {start_epoch} | Step: {trainer.global_step} | "
+                  f"Best val: {trainer.best_val_loss:.4f} | "
+                  f"Cumulative time: {trainer.cumulative_training_time / 3600:.2f}h")
 
     # Train
     trainer.fit(epochs=args.epochs, start_epoch=start_epoch)
