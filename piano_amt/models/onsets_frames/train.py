@@ -555,7 +555,7 @@ class Trainer:
             epochs_left = epochs - epoch
             eta_str = f"  ETA: ~{(epoch_time * epochs_left) / 60:.0f}min" if epochs_left > 0 else ""
             print(
-                f"  train={train_losses['total']:.4f}  val={val_losses['total']:.4f}  "
+                f"  train_loss={train_losses['total']:.4f}  val_loss={val_losses['total']:.4f}  "
                 f"lr={current_lr:.2e}  time={epoch_time:.0f}s{eta_str}{best_marker}\n"
             )
 
@@ -570,8 +570,12 @@ class Trainer:
         print(f"  Epochs trained    : {start_epoch}→{epochs} ({epochs - start_epoch + 1} epochs)")
         print(f"  Best val loss     : {self.best_val_loss:.4f}" +
               (f" (epoch {best_epoch})" if best_epoch else ""))
-        print(f"  Session time      : {total_session_time / 60:.1f} min")
-        print(f"  Total train time  : {self.cumulative_training_time / 3600:.2f} hours")
+        print(f"  Session time      : {total_session_time:.1f} seconds")
+        print(f"  Total train time  : {self.cumulative_training_time:.1f} seconds")
+        epoch_times = self.run_dir._history.get("epoch_time_seconds", [])
+        if epoch_times:
+            avg_epoch = sum(epoch_times) / len(epoch_times)
+            print(f"  Avg epoch time    : {avg_epoch:.1f} seconds")
         print()
 
         # Verify saved files

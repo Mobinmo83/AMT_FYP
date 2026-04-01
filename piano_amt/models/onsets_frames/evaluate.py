@@ -200,10 +200,13 @@ def run_evaluation(
     if max_files:
         split_df = split_df.head(max_files)
 
-    print(f"\nEvaluating {len(split_df)} files from '{split}' split...\n")
+    print(f"\nEvaluating {len(split_df)} files from '{split}' split...")
 
     all_metrics: List[Dict] = []
     per_file:    List[Dict] = []
+
+
+    skipped = 0
 
     for i, row in split_df.iterrows():
         audio_path = str(Path(maestro_root) / row["audio_filename"])
@@ -211,10 +214,8 @@ def run_evaluation(
         cp         = _cache_path(audio_path, cache_dir)
 
         if not cp.exists():
-            print(f"  [{i+1}/{len(split_df)}] SKIP (no cache): {stem}")
+            skipped += 1
             continue
-
-        print(f"  [{i+1}/{len(split_df)}] {stem[:60]}")
 
         file_metrics = evaluate_file(
             model, cp, device,
@@ -230,12 +231,6 @@ def run_evaluation(
         scalars["stem"] = stem
         per_file.append(scalars)
         all_metrics.append(scalars)
-
-        print(
-            f"      onset_f1={scalars.get('onset_f1',0):.3f}  "
-            f"frame_f1={scalars.get('frame_f1',0):.3f}  "
-            f"note+off_f1={scalars.get('note_with_offset_f1',0):.3f}"
-        )
 
         # Optional: save plots
         if save_plots and i < 10:   # first 10 files only
@@ -257,6 +252,12 @@ def run_evaluation(
                 frame_threshold=frame_threshold,
             )
             pm.write(str(midi_dir / f"{stem}.mid"))
+
+    # Compute summary (mean across files)
+    total_requested = len(split_df)
+    total_evaluated = len(all_metrics)
+    print(f"\n  ✓ Successfully evaluated {total_evaluated}/{total_requested} files"
+          + (f" ({skipped} skipped — no cache)" if skipped > 0 else ""))
 
     # Compute summary (mean across files)
     if not all_metrics:
