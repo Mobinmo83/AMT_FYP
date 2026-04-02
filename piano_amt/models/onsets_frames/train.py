@@ -412,7 +412,7 @@ class Trainer:
 
             with torch.amp.autocast("cuda", enabled=self.use_amp):
                 pred   = self.model(batch["mel"])
-                losses = self.criterion(pred, batch)
+            losses = self.criterion(pred, batch)
 
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -462,7 +462,7 @@ class Trainer:
                 batch = self._move(batch)
                 with torch.amp.autocast("cuda", enabled=self.use_amp):
                     pred   = self.model(batch["mel"])
-                    losses = self.criterion(pred, batch)
+                losses = self.criterion(pred, batch)
                 n_batches += 1
                 for k in totals:
                     totals[k] += losses[k].item() if hasattr(losses[k], "item") else losses[k]
