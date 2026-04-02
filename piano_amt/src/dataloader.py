@@ -131,9 +131,12 @@ def get_dataloader(
       - Augmentation applied if use_augmentation=True.
 
     Validation/test split:
-      - segment=False (full spectrogram returned).
+      - segment=True (random 640-frame crop, same as training).
       - shuffle=False, drop_last=False.
       - No augmentation.
+
+    # Test split:
+    #     - segment=False (full spectrogram for sliding-window inference).
 
     Args:
         maestro_root:     Root directory of MAESTRO dataset.
@@ -163,7 +166,7 @@ def get_dataloader(
         maestro_root=maestro_root,
         split=split,
         cache_dir=cache_dir,
-        segment=is_train,       # crop only during training
+        segment=(split != "test"),   # crop train + val; test stays full-length       
         max_files=max_files,
         seed=seed,
     )
