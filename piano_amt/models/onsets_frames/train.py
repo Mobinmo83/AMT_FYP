@@ -104,21 +104,19 @@ class OnsetsFramesLoss(nn.Module):
         super().__init__()
         self.mse = nn.MSELoss(reduction="none")
 
-    def forward(
-        self,
-        pred:   Dict[str, torch.Tensor],
-        target: Dict[str, torch.Tensor],
-    ) -> Dict[str, torch.Tensor]:
-        # BCE on post-sigmoid outputs — matches jongwook exactly
-        loss_onset  = F.binary_cross_entropy(pred["onset"],  target["onset"])
-        loss_frame  = F.binary_cross_entropy(pred["frame"],  target["frame"])
-        loss_offset = F.binary_cross_entropy(pred["offset"], target["offset"])
 
-        # Velocity: masked MSE at onset positions only
-        # jongwook: (onset_label * (vel_label - vel_pred)**2).sum() / onset_label.sum()
+    def forward(self, pred, target):
+        # Cast to float32 — F.binary_cross_entropy is unsafe under AMP autocast
+        def _bce(p, t):
+            return F.binary_cross_entropy(p.float(), t.float())
+
+        loss_onset  = _bce(pred["onset"],  target["onset"])
+        loss_frame  = _bce(pred["frame"],  target["frame"])
+        loss_offset = _bce(pred["offset"], target["offset"])
+
         mask     = (target["onset"] > 0.5).float()
         n_active = mask.sum().clamp(min=1.0)
-        vel_mse  = self.mse(pred["velocity"], target["velocity"])
+        vel_mse  = self.mse(pred["velocity"].float(), target["velocity"].float())
         loss_vel = (vel_mse * mask).sum() / n_active
 
         total = loss_onset + loss_frame + loss_offset + loss_vel
@@ -130,7 +128,6 @@ class OnsetsFramesLoss(nn.Module):
             "offset":   loss_offset.item(),
             "velocity": loss_vel.item(),
         }
-
 
 # ---------------------------------------------------------------------------
 # Run-directory manager
