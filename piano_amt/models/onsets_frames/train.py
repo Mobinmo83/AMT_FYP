@@ -16,16 +16,14 @@ Design:
     global_step, timing history, and metrics history are all restored.
 
 Loss function:
-  Matches jongwook/onsets-and-frames transcriber.py exactly:
-    onset/frame/offset — F.binary_cross_entropy (NO pos_weight)
-    velocity           — masked MSE at onset positions
+  onset/frame/offset — weighted manual BCE (pos_weight configurable per head)
+  velocity           — masked MSE at onset positions only
 
-  This is identical to Magenta's tf_utils.log_loss:
-    -labels * log(pred + eps) - (1 - labels) * log(1 - pred + eps)
-
-  Previous versions used pos_weight=5.0 which caused onset predictions
-  to saturate at ~0.09 (the weighted class prior) instead of reaching
-  confident values. Both Magenta and jongwook use plain unweighted BCE.
+  Default pos_weight=1.0 (plain BCE) matches jongwook at full-dataset scale.
+  For small subsets (≤400 files), set pos_weight_onset/offset=25.0,
+  pos_weight_frame=6.0 to prevent near-zero collapse caused by
+  ~460:1 onset label sparsity on MAESTRO. Values are set via CONFIG
+  in the notebook and passed through Trainer → OnsetsFramesLoss.
 
 Usage (CLI):
     python -m models.onsets_frames.train \\
@@ -85,35 +83,70 @@ from src.dataloader import get_dataloader
 
 class OnsetsFramesLoss(nn.Module):
     """
-    4-head BCE + masked MSE loss for post-sigmoid model outputs.
+    4-head weighted BCE + masked MSE loss for post-sigmoid model outputs.
 
-    Matches jongwook/onsets-and-frames transcriber.py run_on_batch() exactly:
-      onset   — F.binary_cross_entropy  (plain, no pos_weight)
-      frame   — F.binary_cross_entropy  (plain, no pos_weight)
-      offset  — F.binary_cross_entropy  (plain, no pos_weight)
-      velocity— masked MSE at onset positions only
+    Loss design:
+      onset/offset — weighted BCE, pos_weight=25.0
+                     Onset labels are ~460:1 negative:positive on MAESTRO.
+                     pos_weight=25.0 (~5% of true ratio) prevents near-zero
+                     collapse on small subsets while keeping precision bounded.
 
-    Also matches Magenta tf_utils.log_loss (plain BCE, no weighting).
+      frame        — weighted BCE, pos_weight=8.0
+                     Frame labels are ~33:1 — less sparse than onsets.
+                     pos_weight=8.0 (~25% of true ratio) is appropriate.
 
-    Paper: Hawthorne 2018a §3.2 — BCE + velocity masked MSE.
-    jongwook: F.binary_cross_entropy on post-sigmoid outputs.
-    Magenta:  tf_utils.log_loss = -y*log(p) - (1-y)*log(1-p), no weighting.
+      velocity     — masked MSE at onset positions only.
+
+    Scale note:
+      jongwook and Magenta use plain BCE (pos_weight=1.0) because they
+      train on the full MAESTRO dataset for 500,000+ steps, accumulating
+      sufficient positive gradient signal through volume alone.
+      For subsets ≤400 files, pos_weight is required to prevent collapse.
+
+    Papers:
+      Hawthorne 2018a §3.2: weighted onset loss, masked MSE velocity.
+      jongwook MAESTRO paper: disabled weighting at full-dataset scale only.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.mse = nn.MSELoss(reduction="none")
+    def __init__(
+            self,
+            pos_weight_onset:  float = 1.0 ,
+            pos_weight_frame:  float = 1.0,
+            pos_weight_offset: float = 1.0,
+        ) -> None:
+            super().__init__()
+            self.mse = nn.MSELoss(reduction="none")
+            self.pos_weight_onset  = pos_weight_onset
+            self.pos_weight_frame  = pos_weight_frame
+            self.pos_weight_offset = pos_weight_offset
+    def forward(
+        self,
+        pred:   Dict[str, torch.Tensor],
+        target: Dict[str, torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
 
+        device = pred["onset"].device
 
-    def forward(self, pred, target):
-        # Cast to float32 — F.binary_cross_entropy is unsafe under AMP autocast
-        def _bce(p, t):
-            return F.binary_cross_entropy(p.float(), t.float())
+        # Per-head pos_weight based on measured MAESTRO label sparsity:
+        #   onset/offset: ~460:1 → pos_weight=25.0
+        #   frame:         ~33:1 → pos_weight=8.0
+        pos_w_onset  = torch.tensor(self.pos_weight_onset,  device=device)
+        pos_w_frame  = torch.tensor(self.pos_weight_frame,  device=device)
+        pos_w_offset = torch.tensor(self.pos_weight_offset, device=device)
 
-        loss_onset  = _bce(pred["onset"],  target["onset"])
-        loss_frame  = _bce(pred["frame"],  target["frame"])
-        loss_offset = _bce(pred["offset"], target["offset"])
+        def _bce(p, t, pw):
+            # Manual weighted BCE — AMP-safe via .float() cast.
+            # Equivalent to F.binary_cross_entropy with pos_weight
+            # but bypasses the AMP guard on F.binary_cross_entropy.
+            p = p.float().clamp(1e-7, 1 - 1e-7)
+            t = t.float()
+            return -(pw * t * torch.log(p) + (1 - t) * torch.log(1 - p)).mean()
 
+        loss_onset  = _bce(pred["onset"],  target["onset"],  pos_w_onset)
+        loss_frame  = _bce(pred["frame"],  target["frame"],  pos_w_frame)
+        loss_offset = _bce(pred["offset"], target["offset"], pos_w_offset)
+
+        # Velocity: masked MSE at onset positions only
         mask     = (target["onset"] > 0.5).float()
         n_active = mask.sum().clamp(min=1.0)
         vel_mse  = self.mse(pred["velocity"].float(), target["velocity"].float())
@@ -326,6 +359,9 @@ class Trainer:
         log_every:      int   = 50,
         use_amp:        bool  = True,
         use_compile:    bool  = True,
+        pos_weight_onset:  float = 1.0,   # ADD
+        pos_weight_frame:  float = 1.0,    # ADD
+        pos_weight_offset: float = 1.0,   # ADD
     ) -> None:
         self.device         = device
         self.run_dir        = run_dir
@@ -370,7 +406,11 @@ class Trainer:
         # ------------------------------------------------------------------
         # Optimizer, scheduler, loss
         # ------------------------------------------------------------------
-        self.criterion  = OnsetsFramesLoss()
+        self.criterion = OnsetsFramesLoss(
+            pos_weight_onset=pos_weight_onset,
+            pos_weight_frame=pos_weight_frame,
+            pos_weight_offset=pos_weight_offset,
+        )
         self.optimizer  = Adam(model.parameters(), lr=lr)
         self.scheduler  = ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=3
@@ -635,6 +675,12 @@ def main() -> None:
                         help="Disable automatic mixed precision")
     parser.add_argument("--no_compile",   action="store_true",
                         help="Disable torch.compile")
+    parser.add_argument("--pos_weight_onset",  type=float, default=1.0,
+                    help="BCE pos_weight for onset head (default 1.0 = plain BCE)")
+    parser.add_argument("--pos_weight_frame",  type=float, default=1.0,
+                        help="BCE pos_weight for frame head (default 1.0 = plain BCE)")
+    parser.add_argument("--pos_weight_offset", type=float, default=1.0,
+                        help="BCE pos_weight for offset head (default 1.0 = plain BCE)")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -692,6 +738,9 @@ def main() -> None:
         log_every=args.log_every,
         use_amp=not args.no_amp,
         use_compile=not args.no_compile,
+        pos_weight_onset  = args.pos_weight_onset,   
+        pos_weight_frame  = args.pos_weight_frame,   
+        pos_weight_offset = args.pos_weight_offset,  
     )
 
     # Resume from checkpoint

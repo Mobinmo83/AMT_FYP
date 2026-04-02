@@ -162,11 +162,18 @@ def get_dataloader(
 
     is_train = (split == "train")
 
+    seg_frames = (
+        MAX_SEGMENT_FRAMES * 3 if split == "validation"
+        else MAX_SEGMENT_FRAMES if is_train
+        else None
+    )
+
     dataset = MAESTRODataset(
         maestro_root=maestro_root,
         split=split,
         cache_dir=cache_dir,
-        segment=(split != "test"),   # crop train + val; test stays full-length       
+        segment=(split != "test"),
+        segment_frames=seg_frames,
         max_files=max_files,
         seed=seed,
     )

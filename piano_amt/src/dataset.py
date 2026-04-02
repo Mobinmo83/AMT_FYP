@@ -190,12 +190,13 @@ class MAESTRODataset(Dataset):
 
     def __init__(
         self,
-        maestro_root: Union[str, Path],
-        split:        str,
-        cache_dir:    Union[str, Path],
-        segment:      bool = True,
-        max_files:    Optional[int] = None,
-        seed:         int = 42,
+        maestro_root:   Union[str, Path],
+        split:          str,
+        cache_dir:      Union[str, Path],
+        segment:        bool = True,
+        segment_frames: Optional[int] = None,
+        max_files:      Optional[int] = None,
+        seed:           int = 42,
     ) -> None:
         super().__init__()
 
@@ -204,6 +205,7 @@ class MAESTRODataset(Dataset):
         self.cache_dir    = Path(cache_dir)
         self.segment      = segment
         self.seed         = seed
+        self.segment_frames = segment_frames or MAX_SEGMENT_FRAMES
 
         # Locate CSV (MAESTRO v3 ships a single CSV at the root)
         csv_files = sorted(self.maestro_root.glob("*.csv"))
@@ -295,7 +297,7 @@ class MAESTRODataset(Dataset):
         """
         mel = data["mel"]         # (229, T)
         T   = mel.shape[1]
-        W   = MAX_SEGMENT_FRAMES  # 640
+        W   = self.segment_frames
 
         if T <= W:
             # Zero-pad to W frames
