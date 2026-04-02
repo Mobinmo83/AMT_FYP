@@ -4,6 +4,19 @@ models/onsets_frames/evaluate.py — Evaluation harness for OnsetsAndFrames.
 Runs the model on the validation or test split, computes all AMT metrics via
 evaluate/metrics.py, saves per-file results, summary JSON, and piano-roll plots.
 
+Evaluation strategy:
+    Matches both Magenta and jongwook/onsets-and-frames exactly:
+    each piece is processed as a SINGLE full-length forward pass
+    (no windowing, no chunking), giving the BiLSTM complete
+    bidirectional context over the entire performance.
+
+    Magenta README: "validation/test examples containing full pieces"
+    jongwook evaluate.py: sequence_length=None → full piece in one pass
+    Hawthorne 2018a §4: evaluation on complete test recordings
+
+    Requires A100 (40/80GB) or H100 (80GB) for longest MAESTRO pieces.
+    Not suitable for T4 (16GB) on pieces longer than ~4 minutes.
+
 Usage:
     python -m models.onsets_frames.evaluate \\
         --checkpoint  /content/drive/MyDrive/piano_amt/runs/of_baseline_20h/checkpoints/best.pt \\
@@ -66,12 +79,26 @@ def evaluate_file(
     """
     Run model on one full-length cached file and compute all metrics.
 
-    The file is processed with sliding windows (640 frames each, no overlap)
-    and predictions are stitched together.
+    The entire mel spectrogram is passed through the model in a single
+    forward pass — no windowing or chunking. This matches exactly how
+    both Magenta and jongwook evaluate:
+
+      - Magenta: test TFRecords contain "full pieces" (README), processed
+        by the TF Estimator in one pass through the acoustic model + BiLSTMs.
+      - jongwook: evaluate.py calls model.run_on_batch(label) where label
+        contains the full piece (sequence_length=None at eval time).
+
+    Why this matters: the model has 4 BiLSTMs (onset, offset, frame combined,
+    velocity has none). BiLSTMs build context left-to-right and right-to-left.
+    Full-length inference gives every frame complete bidirectional context
+    over the entire performance. Chunked inference resets hidden states at
+    boundaries, degrading predictions at chunk edges.
+
+    Requires GPU with sufficient VRAM (A100 40GB+ or H100 80GB).
 
     Returns:
-        Dict with keys: onset_f1, frame_f1, offset_f1, note_f1, error_analysis,
-                        pred_onset, pred_frame, pred_offset, pred_velocity (tensors)
+        Dict with keys: all metrics from compute_metrics(), error_analysis,
+                        pred tensors for downstream use (prefixed with _)
     """
     data = load_from_cache(cache_path)
     mel  = data["mel"]          # (229, T_full)
@@ -84,28 +111,17 @@ def evaluate_file(
 
     T_full = mel.shape[1]
 
-    # Slide over full mel, run model, stitch
-    windows = sliding_windows(mel, window_frames=MAX_SEGMENT_FRAMES,
-                              hop_frames=MAX_SEGMENT_FRAMES)
-
-    pred_onset    = torch.zeros(T_full, N_KEYS)
-    pred_frame    = torch.zeros(T_full, N_KEYS)
-    pred_offset   = torch.zeros(T_full, N_KEYS)
-    pred_velocity = torch.zeros(T_full, N_KEYS)
-
+    # --- Full-length single-pass inference (Magenta + jongwook approach) ---
     model.eval()
     with torch.no_grad():
-        for win in windows:
-            w_mel   = win["mel"].unsqueeze(0).to(device)   # (1,229,640)
-            start   = win["start_frame"]
-            end     = min(start + MAX_SEGMENT_FRAMES, T_full)
-            length  = end - start
+        # (229, T_full) → (1, 229, T_full) — single batch, full piece
+        w_mel = mel.unsqueeze(0).to(device)
+        out   = model(w_mel)
 
-            out = model(w_mel)
-            pred_onset[start:end]    = out["onset"][0, :length].cpu()
-            pred_frame[start:end]    = out["frame"][0, :length].cpu()
-            pred_offset[start:end]   = out["offset"][0, :length].cpu()
-            pred_velocity[start:end] = out["velocity"][0, :length].cpu()
+        pred_onset    = out["onset"][0].cpu()      # (T_full, 88)
+        pred_frame    = out["frame"][0].cpu()
+        pred_offset   = out["offset"][0].cpu()
+        pred_velocity = out["velocity"][0].cpu()
 
     # Compute note-level and frame-level metrics
     metrics = compute_metrics(
@@ -201,6 +217,7 @@ def run_evaluation(
         split_df = split_df.head(max_files)
 
     print(f"\nEvaluating {len(split_df)} files from '{split}' split...")
+    print(f"  Strategy: full-length single-pass inference (Magenta + jongwook)")
 
     all_metrics: List[Dict] = []
     per_file:    List[Dict] = []
