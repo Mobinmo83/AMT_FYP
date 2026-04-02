@@ -15,6 +15,18 @@ Design:
   - Full resume support: model, optimizer, scheduler, epoch, best_val_loss,
     global_step, timing history, and metrics history are all restored.
 
+Loss function:
+  Matches jongwook/onsets-and-frames transcriber.py exactly:
+    onset/frame/offset — F.binary_cross_entropy (NO pos_weight)
+    velocity           — masked MSE at onset positions
+
+  This is identical to Magenta's tf_utils.log_loss:
+    -labels * log(pred + eps) - (1 - labels) * log(1 - pred + eps)
+
+  Previous versions used pos_weight=5.0 which caused onset predictions
+  to saturate at ~0.09 (the weighted class prior) instead of reaching
+  confident values. Both Magenta and jongwook use plain unweighted BCE.
+
 Usage (CLI):
     python -m models.onsets_frames.train \\
         --run_name  of_baseline_full \\
@@ -35,7 +47,7 @@ Resume after disconnect:
 
 Papers:
   Hawthorne 2018a §3.2: Adam lr=6e-4, grad clip norm 3.0, masked MSE velocity.
-  jongwook/onsets-and-frames: per-param grad clip, batch_size=8.
+  jongwook/onsets-and-frames: per-param grad clip, batch_size=8, plain BCE.
 """
 
 from __future__ import annotations
@@ -49,6 +61,7 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
@@ -74,45 +87,35 @@ class OnsetsFramesLoss(nn.Module):
     """
     4-head BCE + masked MSE loss for post-sigmoid model outputs.
 
-    Because OnsetsAndFrames applies Sigmoid inside forward(), outputs are
-    probabilities in [0,1].  We therefore use BCELoss (not BCEWithLogitsLoss).
+    Matches jongwook/onsets-and-frames transcriber.py run_on_batch() exactly:
+      onset   — F.binary_cross_entropy  (plain, no pos_weight)
+      frame   — F.binary_cross_entropy  (plain, no pos_weight)
+      offset  — F.binary_cross_entropy  (plain, no pos_weight)
+      velocity— masked MSE at onset positions only
 
-    Heads:
-      onset   — BCELoss with pos_weight  (class imbalance: few notes active)
-      frame   — BCELoss with pos_weight
-      offset  — BCELoss with pos_weight
-      velocity— MSE computed ONLY at frames where onset target > 0.5
+    Also matches Magenta tf_utils.log_loss (plain BCE, no weighting).
 
-    Args:
-        pos_weight: Scalar weight on positive class for BCE heads.
-                    Default 5.0 — Hawthorne 2018a §3.2.
-
-    Paper: Hawthorne 2018a §3.2 — weighted BCE, velocity masked MSE.
+    Paper: Hawthorne 2018a §3.2 — BCE + velocity masked MSE.
+    jongwook: F.binary_cross_entropy on post-sigmoid outputs.
+    Magenta:  tf_utils.log_loss = -y*log(p) - (1-y)*log(1-p), no weighting.
     """
 
-    def __init__(self, pos_weight: float = 5.0) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.pos_weight = pos_weight
         self.mse = nn.MSELoss(reduction="none")
-
-    def _bce(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Weighted BCE: pos_weight on positive class."""
-        loss = -(
-            self.pos_weight * target * torch.log(pred.clamp(min=1e-7))
-            + (1.0 - target) * torch.log((1.0 - pred).clamp(min=1e-7))
-        )
-        return loss.mean()
 
     def forward(
         self,
         pred:   Dict[str, torch.Tensor],
         target: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
-        loss_onset  = self._bce(pred["onset"],  target["onset"])
-        loss_frame  = self._bce(pred["frame"],  target["frame"])
-        loss_offset = self._bce(pred["offset"], target["offset"])
+        # BCE on post-sigmoid outputs — matches jongwook exactly
+        loss_onset  = F.binary_cross_entropy(pred["onset"],  target["onset"])
+        loss_frame  = F.binary_cross_entropy(pred["frame"],  target["frame"])
+        loss_offset = F.binary_cross_entropy(pred["offset"], target["offset"])
 
         # Velocity: masked MSE at onset positions only
+        # jongwook: (onset_label * (vel_label - vel_pred)**2).sum() / onset_label.sum()
         mask     = (target["onset"] > 0.5).float()
         n_active = mask.sum().clamp(min=1.0)
         vel_mse  = self.mse(pred["velocity"], target["velocity"])
@@ -322,7 +325,6 @@ class Trainer:
         device:         torch.device,
         run_dir:        RunDirectory,
         lr:             float = 6e-4,
-        pos_weight:     float = 5.0,
         max_grad_norm:  float = 3.0,
         log_every:      int   = 50,
         use_amp:        bool  = True,
@@ -371,7 +373,7 @@ class Trainer:
         # ------------------------------------------------------------------
         # Optimizer, scheduler, loss
         # ------------------------------------------------------------------
-        self.criterion  = OnsetsFramesLoss(pos_weight=pos_weight)
+        self.criterion  = OnsetsFramesLoss()
         self.optimizer  = Adam(model.parameters(), lr=lr)
         self.scheduler  = ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=3
@@ -625,7 +627,6 @@ def main() -> None:
     parser.add_argument("--batch_size",   type=int, default=8)
     parser.add_argument("--epochs",       type=int, default=30)
     parser.add_argument("--lr",           type=float, default=6e-4)
-    parser.add_argument("--pos_weight",   type=float, default=5.0)
     parser.add_argument("--max_grad_norm",type=float, default=3.0)
     parser.add_argument("--model_complexity", type=int, default=48,
                         help="Scales hidden dim: size=complexity*16 (default 48→26M)")
@@ -690,7 +691,6 @@ def main() -> None:
         device=device,
         run_dir=run_dir,
         lr=args.lr,
-        pos_weight=args.pos_weight,
         max_grad_norm=args.max_grad_norm,
         log_every=args.log_every,
         use_amp=not args.no_amp,
