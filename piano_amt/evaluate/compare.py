@@ -5,8 +5,7 @@ Scans all runs/<run_name>/eval_<split>/summary_metrics.json files and
 produces:
   1. A printed table (sorted by onset_f1 descending).
   2. A CSV file for importing into your dissertation.
-  3. A LaTeX-formatted table string for direct copy-paste.
-  4. A grouped bar chart PNG comparing the main metrics.
+  3. A grouped bar chart PNG comparing the main metrics.
 
 Usage:
     python -m evaluate.compare \\
@@ -37,9 +36,11 @@ def compare_all_runs(
     split:    str = "test",
 ) -> List[Dict]:
     """
-    Scan all runs under runs_dir and collect their summary metrics.
+    Scan all runs under runs_dir and collect their summary metrics
+    plus model config info.
 
     Looks for: runs/<run_name>/eval_<split>/summary_metrics.json
+    Also loads: runs/<run_name>/config.json (if available)
 
     Args:
         runs_dir: Parent directory of all run directories.
@@ -47,7 +48,8 @@ def compare_all_runs(
 
     Returns:
         List of dicts, one per run, sorted by onset_f1 descending.
-        Each dict has all keys from summary_metrics.json plus "run_name".
+        Each dict has all keys from summary_metrics.json plus "run_name"
+        and config keys (lr, batch_size, max_files, epochs, model_complexity).
     """
     runs_dir = Path(runs_dir)
     pattern  = f"*/eval_{split}/summary_metrics.json"
@@ -63,6 +65,18 @@ def compare_all_runs(
         with open(mf) as f:
             data = json.load(f)
         data["run_name"] = run_name
+
+        # Load config.json for model/training info
+        config_path = mf.parent.parent / "config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                cfg = json.load(f)
+            data["cfg_lr"]               = cfg.get("lr", None)
+            data["cfg_batch_size"]       = cfg.get("batch_size", None)
+            data["cfg_max_files"]        = cfg.get("max_files", None)
+            data["cfg_epochs"]           = cfg.get("epochs", None)
+            data["cfg_model_complexity"] = cfg.get("model_complexity", None)
+
         rows.append(data)
 
     rows.sort(key=lambda r: r.get("onset_f1", 0), reverse=True)
@@ -74,15 +88,18 @@ def compare_all_runs(
 # ---------------------------------------------------------------------------
 
 _DISPLAY_COLS = [
-    ("run_name",                 "Run",                 18),
-    ("onset_f1",                 "Onset F1",            10),
-    ("frame_f1",                 "Frame F1",            10),
-    ("note_with_offset_f1",      "Note+Off F1",         12),
-    ("note_with_offset_vel_f1",  "N+O+V F1",            10),
-    ("frame_accuracy",           "Frame Acc",           10),
-    ("ea_offset_mae_ms",         "Offset MAE(ms)",      16),
-    ("ea_chord_completeness",    "Chord Comp",          11),
-    ("n_files",                  "N files",              8),
+    ("run_name",                     "Run",              18),
+    ("onset_precision",              "Onset P",          10),
+    ("onset_recall",                 "Onset R",          10),
+    ("onset_f1",                     "Onset F1",         10),
+    ("frame_f1",                     "Frame F1",         10),
+    ("note_with_offset_f1",          "Note+Off F1",      12),
+    ("note_with_offset_vel_f1",      "N+O+V F1",         10),
+    ("ea_offset_mae_ms",             "Off MAE(ms)",      12),
+    ("ea_chord_completeness",        "Chord Comp",       11),
+    ("n_files",                      "N files",           8),
+    ("cfg_epochs",                   "Epochs",            8),
+    ("cfg_max_files",                "Train files",      11),
 ]
 
 
@@ -102,7 +119,9 @@ def print_comparison_table(rows: List[Dict]) -> None:
         cells = []
         for key, _, width in _DISPLAY_COLS:
             val = row.get(key, "—")
-            if isinstance(val, float):
+            if val is None:
+                cells.append("—".ljust(width))
+            elif isinstance(val, float):
                 cells.append(f"{val:.4f}".ljust(width))
             else:
                 cells.append(str(val).ljust(width))
@@ -135,61 +154,6 @@ def save_comparison_csv(
             for row in rows:
                 f.write(",".join(str(row.get(k, "")) for k in keys) + "\n")
         print(f"CSV saved → {out_path}")
-
-
-# ---------------------------------------------------------------------------
-# LaTeX table
-# ---------------------------------------------------------------------------
-
-def latex_table(rows: List[Dict]) -> str:
-    """
-    Generate a LaTeX tabular string for the dissertation.
-
-    Columns: Run | Onset F1 | Frame F1 | Note+Offset F1 | N+O+V F1 | Offset MAE
-    """
-    if not rows:
-        return ""
-
-    cols = [
-        ("run_name",                "Run"),
-        ("onset_f1",                "Onset F1"),
-        ("frame_f1",                "Frame F1"),
-        ("note_with_offset_f1",     "Note+Offset F1"),
-        ("note_with_offset_vel_f1", "N+O+V F1"),
-        ("ea_offset_mae_ms",        "Offset MAE (ms)"),
-    ]
-
-    n_cols = len(cols)
-    col_fmt = "l" + "r" * (n_cols - 1)
-
-    lines = [
-        r"\begin{table}[h]",
-        r"\centering",
-        r"\caption{AMT model comparison}",
-        r"\label{tab:amt_comparison}",
-        rf"\begin{{tabular}}{{{col_fmt}}}",
-        r"\toprule",
-        " & ".join(label for _, label in cols) + r" \\",
-        r"\midrule",
-    ]
-
-    for row in rows:
-        cells = []
-        for key, _ in cols:
-            val = row.get(key, "—")
-            if isinstance(val, float):
-                cells.append(f"{val:.4f}")
-            else:
-                cells.append(str(val).replace("_", r"\_"))
-        lines.append(" & ".join(cells) + r" \\")
-
-    lines += [
-        r"\bottomrule",
-        r"\end{tabular}",
-        r"\end{table}",
-    ]
-
-    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +228,7 @@ def main() -> None:
     parser.add_argument("--runs_dir", required=True)
     parser.add_argument("--split",    default="test")
     parser.add_argument("--out_dir",  default=None,
-                        help="Directory to save CSV, PNG, LaTeX. "
+                        help="Directory to save CSV, PNG. "
                              "Defaults to runs_dir/comparison/")
     args = parser.parse_args()
 
@@ -278,12 +242,6 @@ def main() -> None:
     print_comparison_table(rows)
 
     save_comparison_csv(rows, out_dir / f"comparison_{args.split}.csv")
-
-    latex = latex_table(rows)
-    latex_path = out_dir / f"comparison_{args.split}.tex"
-    with open(latex_path, "w") as f:
-        f.write(latex)
-    print(f"LaTeX table saved → {latex_path}")
 
     plot_comparison_bar(
         rows,

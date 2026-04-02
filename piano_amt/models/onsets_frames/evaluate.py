@@ -217,7 +217,7 @@ def run_evaluation(
         split_df = split_df.head(max_files)
 
     print(f"\nEvaluating {len(split_df)} files from '{split}' split...")
-    print(f"  Strategy: full-length single-pass inference (Magenta + jongwook)")
+    print(f" full length single pass inference")
 
     all_metrics: List[Dict] = []
     per_file:    List[Dict] = []
