@@ -115,7 +115,7 @@ def evaluate_file(
     model.eval()
     with torch.no_grad():
         # (229, T_full) → (1, 229, T_full) — single batch, full piece
-        w_mel = mel.unsqueeze(0).to(device)
+        w_mel = mel.unsqueeze(0).to(device).contiguous()  
         out   = model(w_mel)
 
         pred_onset    = out["onset"][0].cpu()      # (T_full, 88)
