@@ -420,11 +420,7 @@ def run_evaluation(
     print(f"    offset_min_tol:    {proto['offset_min_tolerance_s']*1000:.0f} ms")
     print(f"    velocity_tolerance:{proto['velocity_tolerance']}")
     print(f"    mir_eval version:  {proto['mir_eval_version']}")
-
-    print(f"\n  Results saved → {eval_dir}")
-    print(f"{'='*60}\n")
     
-
     # ---------------------------------------------------------------------------
     # Print summary
     # ---------------------------------------------------------------------------
@@ -443,7 +439,9 @@ def run_evaluation(
     print()
 
     # Primary metrics (paper-comparable)
+    print(f"\n{'='*60}")
     print(f"  {'— Primary metrics —':^50}")
+    print(f"\n{'='*60}")
     print(f"  {'Metric':<35s}  {'P':>7s}  {'R':>7s}  {'F1':>7s}")
     print(f"  {'-'*60}")
     for prefix, label in [
@@ -465,8 +463,10 @@ def run_evaluation(
     print(f"  Avg notes/file:  pred={n_pred:.0f}  gt={n_gt:.0f}  "
           f"ratio={n_pred/n_gt:.2f}" if n_gt > 0 else "")
 
+    print(f"\n{'='*60}")
     # Supplementary metrics (project-specific error analysis)
     print(f"\n  {'— Supplementary error analysis —':^50}")
+    print(f"\n{'='*60}")
     for key, label, fmt in [
         ("ea_offset_mae_ms",       "Offset MAE",           "{:.1f} ms"),
         ("ea_onset_mae_ms",        "Onset MAE",            "{:.1f} ms"),
@@ -475,6 +475,10 @@ def run_evaluation(
     ]:
         val = summary.get(key, 0)
         print(f"  {label:<35s}  {fmt.format(val)}")
+
+
+    print(f"\n  Results saved → {eval_dir}")
+    print(f"{'='*60}\n")
 
 
 
