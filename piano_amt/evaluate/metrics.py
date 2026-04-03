@@ -67,15 +67,19 @@ OFFSET_MIN_TOLERANCE = 0.05    # 50 ms minimum offset tolerance
 VELOCITY_TOLERANCE   = 0.1     # normalised velocity tolerance
 
 
-def get_eval_protocol() -> Dict[str, float]:
-    """Return the locked evaluation protocol as a dict (for saving to JSON)."""
+def get_eval_protocol(
+    onset_tolerance=ONSET_TOLERANCE,
+    offset_ratio=OFFSET_RATIO,
+    offset_min_tolerance=OFFSET_MIN_TOLERANCE,
+    velocity_tolerance=VELOCITY_TOLERANCE,
+) -> Dict[str, float]:
     return {
-        "onset_tolerance_s":      ONSET_TOLERANCE,
-        "pitch_tolerance_cents":  PITCH_TOLERANCE * 100,   # 25 cents display
+        "onset_tolerance_s":      onset_tolerance,
+        "pitch_tolerance_cents":  PITCH_TOLERANCE * 100,
         "pitch_tolerance_raw":    PITCH_TOLERANCE,
-        "offset_ratio":           OFFSET_RATIO,
-        "offset_min_tolerance_s": OFFSET_MIN_TOLERANCE,
-        "velocity_tolerance":     VELOCITY_TOLERANCE,
+        "offset_ratio":           offset_ratio,
+        "offset_min_tolerance_s": offset_min_tolerance,
+        "velocity_tolerance":     velocity_tolerance,
         "mir_eval_version":       mir_eval.__version__ if _MIR_EVAL_AVAILABLE else "N/A",
     }
 
@@ -185,6 +189,10 @@ def compute_note_metrics(
     frame_threshold:  float = 0.5,
     offset_threshold: float = 0.5,
     fps:              float = 31.25,
+    onset_tolerance:     float = ONSET_TOLERANCE,
+    offset_ratio:        float = OFFSET_RATIO,
+    offset_min_tolerance: float = OFFSET_MIN_TOLERANCE,
+    velocity_tolerance:  float = VELOCITY_TOLERANCE,
 ) -> Dict[str, float]:
     """
     Note-level precision / recall / F1 using mir_eval.transcription.
@@ -257,7 +265,7 @@ def compute_note_metrics(
         ref_pitches=gt_pitches,
         est_intervals=pred_intervals,
         est_pitches=pred_pitches,
-        onset_tolerance=ONSET_TOLERANCE,
+        onset_tolerance=onset_tolerance,  
         pitch_tolerance=PITCH_TOLERANCE,
         offset_ratio=None,
         offset_min_tolerance=None,
@@ -275,10 +283,10 @@ def compute_note_metrics(
         ref_pitches=gt_pitches,
         est_intervals=pred_intervals,
         est_pitches=pred_pitches,
-        onset_tolerance=ONSET_TOLERANCE,
+        onset_tolerance=onset_tolerance,
         pitch_tolerance=PITCH_TOLERANCE,
-        offset_ratio=OFFSET_RATIO,
-        offset_min_tolerance=OFFSET_MIN_TOLERANCE,
+        offset_ratio=offset_ratio,
+        offset_min_tolerance=offset_min_tolerance,
     )
     results["note_with_offset_precision"] = float(p)
     results["note_with_offset_recall"]    = float(r)
@@ -295,11 +303,11 @@ def compute_note_metrics(
         est_intervals=pred_intervals,
         est_pitches=pred_pitches,
         est_velocities=pred_vels,
-        onset_tolerance=ONSET_TOLERANCE,
+        onset_tolerance=onset_tolerance,
         pitch_tolerance=PITCH_TOLERANCE,
-        offset_ratio=OFFSET_RATIO,
-        offset_min_tolerance=OFFSET_MIN_TOLERANCE,
-        velocity_tolerance=VELOCITY_TOLERANCE,
+        offset_ratio=offset_ratio,
+        offset_min_tolerance=offset_min_tolerance,
+        velocity_tolerance=velocity_tolerance,
     )
     results["note_with_offset_vel_precision"] = float(p)
     results["note_with_offset_vel_recall"]    = float(r)
@@ -324,6 +332,10 @@ def compute_metrics(
     onset_threshold:  float = 0.5,
     frame_threshold:  float = 0.5,
     offset_threshold: float = 0.5,
+    onset_tolerance:     float = ONSET_TOLERANCE,
+    offset_ratio:        float = OFFSET_RATIO,
+    offset_min_tolerance: float = OFFSET_MIN_TOLERANCE,
+    velocity_tolerance:  float = VELOCITY_TOLERANCE,
     fps:              float = 31.25,
 ) -> Dict[str, float]:
     """
@@ -356,7 +368,12 @@ def compute_metrics(
             onset_threshold=onset_threshold,
             frame_threshold=frame_threshold,
             fps=fps,
+            onset_tolerance=onset_tolerance,
+            offset_ratio=offset_ratio,
+            offset_min_tolerance=offset_min_tolerance,
+            velocity_tolerance=velocity_tolerance,
         ))
+
     else:
         print("WARNING: mir_eval not installed — note-level metrics skipped.")
 

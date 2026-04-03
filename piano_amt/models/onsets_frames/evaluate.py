@@ -80,6 +80,10 @@ def evaluate_file(
     onset_threshold:  float = 0.5,
     frame_threshold:  float = 0.5,
     offset_threshold: float = 0.5,
+    onset_tolerance:     float = 0.05,
+    offset_ratio:        float = 0.2,
+    offset_min_tolerance: float = 0.05,
+    velocity_tolerance:  float = 0.1,
 ) -> Dict:
     """
     Run model on one full-length cached file and compute all metrics.
@@ -146,6 +150,10 @@ def evaluate_file(
         onset_threshold=onset_threshold,
         frame_threshold=frame_threshold,
         offset_threshold=offset_threshold,
+        onset_tolerance=onset_tolerance,
+        offset_ratio=offset_ratio,
+        offset_min_tolerance=offset_min_tolerance,
+        velocity_tolerance=velocity_tolerance,
         fps=FRAMES_PER_SECOND,
     )
 
@@ -206,6 +214,10 @@ def run_evaluation(
     onset_threshold: float = 0.5,
     frame_threshold: float = 0.5,
     model_complexity: int = 48,
+    onset_tolerance:     float = 0.05,
+    offset_ratio:        float = 0.2,
+    offset_min_tolerance: float = 0.05,
+    velocity_tolerance:  float = 0.1,
 ) -> Dict:
     """
     Full evaluation run. Returns summary metrics dict.
@@ -253,8 +265,8 @@ def run_evaluation(
         split_df = split_df.head(max_files)
 
     print(f"\nEvaluating {len(split_df)}/{total_in_split} files from '{split}' split...")
-    print(f"  Strategy: full-length single-pass inference (cuDNN disabled for LSTM)")
-    print(f"  Thresholds: onset={onset_threshold}, frame={frame_threshold}")
+    print(f"  Strategy: full-length single-pass inference")
+    
 
     all_metrics: List[Dict] = []
     per_file:    List[Dict] = []
@@ -277,6 +289,10 @@ def run_evaluation(
             model, cp, device,
             onset_threshold=onset_threshold,
             frame_threshold=frame_threshold,
+            onset_tolerance=onset_tolerance,
+            offset_ratio=offset_ratio,
+            offset_min_tolerance=offset_min_tolerance,
+            velocity_tolerance=velocity_tolerance
         )
 
         file_elapsed = time.time() - file_start
@@ -294,9 +310,9 @@ def run_evaluation(
         all_metrics.append(scalars)
 
         # Progress (every 10 files)
-        if eval_counter % 10 == 0:
-            print(f"  [{eval_counter}/{len(split_df) - skipped}] "
-                  f"{stem[:40]}... {file_elapsed:.1f}s")
+        # if eval_counter % 10 == 0:
+        #     print(f"  [{eval_counter}/{len(split_df) - skipped}] "
+        #           f"{stem[:40]}... {file_elapsed:.1f}s")
 
         # Optional: save plots (use eval_counter, not DataFrame index i)
         if save_plots and eval_counter <= 10:
@@ -364,7 +380,12 @@ def run_evaluation(
     summary["maestro_root"]      = str(maestro_root)
 
     # Evaluation protocol (locked tolerances)
-    summary["eval_protocol"]     = get_eval_protocol()
+    summary["eval_protocol"]     = get_eval_protocol(
+        onset_tolerance=onset_tolerance,
+        offset_ratio=offset_ratio,
+        offset_min_tolerance=offset_min_tolerance,
+        velocity_tolerance=velocity_tolerance,
+    )
 
     # GPU / environment
     summary["gpu_info"]          = gpu_info
@@ -382,9 +403,32 @@ def run_evaluation(
     with open(eval_dir / "per_file_metrics.json", "w") as f:
         json.dump(per_file, f, indent=2)
 
+
+        # Protocol reminder
+    print(f"\n  {'— Decoding + evaluation protocol —':^50}")
+    proto = summary["eval_protocol"]
+
+    print("  Decode thresholds:")
+    print(f"    onset_threshold:   {summary['onset_threshold']:.2f}")
+    print(f"    frame_threshold:   {summary['frame_threshold']:.2f}")
+
+    print("  Evaluation tolerances:")
+    print(f"    onset_tolerance:   {proto['onset_tolerance_s']*1000:.0f} ms")
+    print(f"    pitch_tolerance:   {proto['pitch_tolerance_raw']:.2f} "
+        f"({proto['pitch_tolerance_cents']:.0f} cents)")
+    print(f"    offset_ratio:      {proto['offset_ratio']}")
+    print(f"    offset_min_tol:    {proto['offset_min_tolerance_s']*1000:.0f} ms")
+    print(f"    velocity_tolerance:{proto['velocity_tolerance']}")
+    print(f"    mir_eval version:  {proto['mir_eval_version']}")
+
+    print(f"\n  Results saved → {eval_dir}")
+    print(f"{'='*60}\n")
+    
+
     # ---------------------------------------------------------------------------
     # Print summary
     # ---------------------------------------------------------------------------
+
     print(f"\n{'='*60}")
     print(f"  EVALUATION SUMMARY — {split} split (n={total_evaluated})")
     print(f"{'='*60}")
@@ -399,7 +443,7 @@ def run_evaluation(
     print()
 
     # Primary metrics (paper-comparable)
-    print(f"  {'— Primary metrics (Hawthorne 2018a Table 1) —':^50}")
+    print(f"  {'— Primary metrics —':^50}")
     print(f"  {'Metric':<35s}  {'P':>7s}  {'R':>7s}  {'F1':>7s}")
     print(f"  {'-'*60}")
     for prefix, label in [
@@ -432,19 +476,7 @@ def run_evaluation(
         val = summary.get(key, 0)
         print(f"  {label:<35s}  {fmt.format(val)}")
 
-    # Protocol reminder
-    print(f"\n  {'— Evaluation protocol —':^50}")
-    proto = summary["eval_protocol"]
-    print(f"  onset_tolerance:   {proto['onset_tolerance_s']*1000:.0f} ms")
-    print(f"  pitch_tolerance:   {proto['pitch_tolerance_raw']:.2f} "
-          f"({proto['pitch_tolerance_cents']:.0f} cents)")
-    print(f"  offset_ratio:      {proto['offset_ratio']}")
-    print(f"  offset_min_tol:    {proto['offset_min_tolerance_s']*1000:.0f} ms")
-    print(f"  velocity_tolerance:{proto['velocity_tolerance']}")
-    print(f"  mir_eval version:  {proto['mir_eval_version']}")
 
-    print(f"\n  Results saved → {eval_dir}")
-    print(f"{'='*60}\n")
 
     return summary
 
