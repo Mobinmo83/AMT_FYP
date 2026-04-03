@@ -129,10 +129,10 @@ class ConvStack(nn.Module):
         x = self.cnn(x)                      # (B, ch2, T, F//4)
 
         # jongwook: x.transpose(1, 2).flatten(-2) → (B, T, ch2 * F//4)
-        # x = x.transpose(1, 2)               # (B, T, ch2, F//4)
-        # x = x.flatten(-2)                   # (B, T, ch2 * F//4)
-        x = x.transpose(1, 2).contiguous()  # (B, T, ch2, F//4)  ← now contiguous
+        x = x.transpose(1, 2)               # (B, T, ch2, F//4)
         x = x.flatten(-2)                   # (B, T, ch2 * F//4)
+        # x = x.transpose(1, 2).contiguous()  # (B, T, ch2, F//4)  ← now contiguous
+        # x = x.flatten(-2)                   # (B, T, ch2 * F//4)
 
         x = self.fc(x)                       # (B, T, output_features)
         return x
@@ -172,7 +172,7 @@ class BiLSTM(nn.Module):
             (B, T, output_size * 2)
         """
         out, _ = self.lstm(x)
-        return out.contiguous()
+        return out  #.contiguous()
 
 
 # ---------------------------------------------------------------------------
