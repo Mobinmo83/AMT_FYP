@@ -172,7 +172,7 @@ class BiLSTM(nn.Module):
             (B, T, output_size * 2)
         """
         out, _ = self.lstm(x)
-        return out
+        return out.contiguous()
 
 
 # ---------------------------------------------------------------------------
