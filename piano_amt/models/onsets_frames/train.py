@@ -413,9 +413,8 @@ class Trainer:
         )
         self.optimizer  = Adam(model.parameters(), lr=lr)
         self.scheduler  = ReduceLROnPlateau(
-            self.optimizer, mode="min", factor=0.5, patience=3
+            self.optimizer, mode="min", factor=0.5, patience=15, min_lr=1e-5
         )
-
         self.train_loader   = train_loader
         self.val_loader     = val_loader
         self.global_step    = 0
