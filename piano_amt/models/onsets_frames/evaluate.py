@@ -111,14 +111,23 @@ def evaluate_file(
 
     T_full = mel.shape[1]
 
-    # --- Full-length single-pass inference (Magenta + jongwook approach) ---
+    # # --- Full-length single-pass inference (Magenta + jongwook approach) ---
+    # model.eval()
+    # with torch.no_grad():
+    #     # (229, T_full) → (1, 229, T_full) — single batch, full piece
+    #     w_mel = mel.unsqueeze(0).to(device) 
+    #     out   = model(w_mel)
+
+    #     pred_onset    = out["onset"][0].cpu()      # (T_full, 88)
+    #     pred_frame    = out["frame"][0].cpu()
+    #     pred_offset   = out["offset"][0].cpu()
+    #     pred_velocity = out["velocity"][0].cpu()
     model.eval()
-    with torch.no_grad():
-        # (229, T_full) → (1, 229, T_full) — single batch, full piece
-        w_mel = mel.unsqueeze(0).to(device) 
+    with torch.no_grad(), torch.backends.cudnn.flags(enabled=False):
+        w_mel = mel.unsqueeze(0).to(device)
         out   = model(w_mel)
 
-        pred_onset    = out["onset"][0].cpu()      # (T_full, 88)
+        pred_onset    = out["onset"][0].cpu()
         pred_frame    = out["frame"][0].cpu()
         pred_offset   = out["offset"][0].cpu()
         pred_velocity = out["velocity"][0].cpu()
