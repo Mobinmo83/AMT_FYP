@@ -182,17 +182,15 @@ def evaluate_file(
 # ---------------------------------------------------------------------------
 
 def _get_gpu_info() -> Dict[str, str]:
-    """Collect GPU information for reproducibility logging."""
     info = {"device": "cpu"}
     if torch.cuda.is_available():
-        info["device"]   = torch.cuda.get_device_name(0)
-        info["vram_gb"]  = f"{torch.cuda.get_device_properties(0).total_mem / 1e9:.1f}"
-        info["cuda"]     = torch.version.cuda or "N/A"
-        info["cudnn"]    = str(torch.backends.cudnn.version()) if torch.backends.cudnn.is_available() else "N/A"
+        props = torch.cuda.get_device_properties(0)
+        info["device"] = torch.cuda.get_device_name(0)
+        info["vram_gb"] = f"{props.total_memory / 1e9:.1f}"
+        info["cuda"] = torch.version.cuda or "N/A"
+        info["cudnn"] = str(torch.backends.cudnn.version()) if torch.backends.cudnn.is_available() else "N/A"
     info["pytorch"] = torch.__version__
     return info
-
-
 # ---------------------------------------------------------------------------
 # Main evaluation loop
 # ---------------------------------------------------------------------------
