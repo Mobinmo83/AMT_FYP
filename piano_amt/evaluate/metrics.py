@@ -7,22 +7,32 @@ subsequent AMT papers for fair comparison:
   Frame-level (binary piano roll):
     frame_precision, frame_recall, frame_f1, frame_accuracy
 
-  Note-level (matched by onset time):
-    onset_precision, onset_recall, onset_f1
+  Note-level — 3 tiers following Hawthorne 2018a §4 Table 1 naming:
 
-  Note-level (matched by onset + offset):
-    note_with_offset_precision, note_with_offset_recall, note_with_offset_f1
+    Tier 1 — "Note" (onset + pitch match):
+      note_precision, note_recall, note_f1
+      mir_eval: onset_tolerance=50ms, pitch_tolerance=50cents, offset_ratio=None
 
-  Note-level (matched by onset + offset + velocity):
-    note_with_offset_vel_precision, note_with_offset_vel_recall,
-    note_with_offset_vel_f1
+    Tier 2 — "Note with offset":
+      note_with_offset_precision, note_with_offset_recall, note_with_offset_f1
+      mir_eval: + offset_ratio=0.2, offset_min_tolerance=50ms
 
-All note-level metrics use mir_eval.transcription which matches notes with
-an onset tolerance of 50 ms and offset tolerance of 50 ms or 20% of note
-duration (whichever is larger) — standard AMT benchmark tolerances.
+    Tier 3 — "Note with offset and velocity":
+      note_with_offset_vel_precision, note_with_offset_vel_recall,
+      note_with_offset_vel_f1
+      mir_eval: + velocity_tolerance=0.1 (normalized)
+
+  Evaluation protocol (locked for reproducibility):
+    onset_tolerance      = 0.05 s  (50 ms)
+    pitch_tolerance      = 0.25    (50 cents / quarter semitone)
+    offset_ratio         = 0.2     (20% of ref note duration)
+    offset_min_tolerance = 0.05 s  (50 ms minimum)
+    velocity_tolerance   = 0.1     (normalized velocity difference)
+
+  Dataset: MAESTRO v3.0.0, official splits.
 
 Dependencies:
-    pip install mir_eval
+    pip install mir_eval>=0.7
 
 Papers:
     Hawthorne 2018a §4 — evaluation protocol.
@@ -44,6 +54,30 @@ try:
     _MIR_EVAL_AVAILABLE = True
 except ImportError:
     _MIR_EVAL_AVAILABLE = False
+
+
+# ---------------------------------------------------------------------------
+# Evaluation protocol constants (locked — do not change between runs)
+# ---------------------------------------------------------------------------
+
+ONSET_TOLERANCE      = 0.05    # 50 ms
+PITCH_TOLERANCE      = 0.25    # 50 cents (quarter semitone)
+OFFSET_RATIO         = 0.2     # 20% of reference note duration
+OFFSET_MIN_TOLERANCE = 0.05    # 50 ms minimum offset tolerance
+VELOCITY_TOLERANCE   = 0.1     # normalised velocity tolerance
+
+
+def get_eval_protocol() -> Dict[str, float]:
+    """Return the locked evaluation protocol as a dict (for saving to JSON)."""
+    return {
+        "onset_tolerance_s":      ONSET_TOLERANCE,
+        "pitch_tolerance_cents":  PITCH_TOLERANCE * 100,   # 25 cents display
+        "pitch_tolerance_raw":    PITCH_TOLERANCE,
+        "offset_ratio":           OFFSET_RATIO,
+        "offset_min_tolerance_s": OFFSET_MIN_TOLERANCE,
+        "velocity_tolerance":     VELOCITY_TOLERANCE,
+        "mir_eval_version":       mir_eval.__version__ if _MIR_EVAL_AVAILABLE else "N/A",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -155,12 +189,22 @@ def compute_note_metrics(
     """
     Note-level precision / recall / F1 using mir_eval.transcription.
 
-    Three tiers:
-      1. onset_f1:               onset within 50 ms
-      2. note_with_offset_f1:    onset + offset within tolerance
-      3. note_with_offset_vel_f1: onset + offset + velocity within 0.1
+    Three tiers (Hawthorne 2018a Table 1 naming):
 
-    Returns dict with all three tiers' P/R/F1 values.
+      Tier 1 — "Note" (onset + pitch):
+        onset within 50 ms, pitch within 50 cents, offset ignored.
+        This is the standard "Note F1" reported in most papers.
+
+      Tier 2 — "Note with offset":
+        onset + pitch + offset within max(50ms, 20% of note duration).
+
+      Tier 3 — "Note with offset and velocity":
+        onset + pitch + offset + normalised velocity within 0.1.
+
+    Also reports note counts for diagnostics:
+      n_pred_notes, n_gt_notes
+
+    Returns dict with all three tiers' P/R/F1 values plus note counts.
     """
     if not _MIR_EVAL_AVAILABLE:
         raise ImportError(
@@ -190,46 +234,60 @@ def compute_note_metrics(
 
     results: Dict[str, float] = {}
 
+    # Note counts (useful for diagnostics)
+    results["n_pred_notes"] = len(pred_pitches)
+    results["n_gt_notes"]   = len(gt_pitches)
+
     if len(pred_pitches) == 0 or len(gt_pitches) == 0:
         for k in [
-            "onset_precision","onset_recall","onset_f1",
-            "note_with_offset_precision","note_with_offset_recall","note_with_offset_f1",
-            "note_with_offset_vel_precision","note_with_offset_vel_recall","note_with_offset_vel_f1",
+            "note_precision", "note_recall", "note_f1",
+            "note_with_offset_precision", "note_with_offset_recall", "note_with_offset_f1",
+            "note_with_offset_vel_precision", "note_with_offset_vel_recall", "note_with_offset_vel_f1",
         ]:
             results[k] = 0.0
         return results
 
-    # Tier 1: onset only (50 ms tolerance)
+    # ------------------------------------------------------------------
+    # Tier 1 — "Note" F1 (onset + pitch, no offset)
+    # This is the primary metric for paper comparison.
+    # Hawthorne 2018a Table 1: "Note" column.
+    # ------------------------------------------------------------------
     p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
         ref_intervals=gt_intervals,
         ref_pitches=gt_pitches,
         est_intervals=pred_intervals,
         est_pitches=pred_pitches,
-        onset_tolerance=0.05,   # 50 ms
-        pitch_tolerance=0.25,   # quarter semitone (MIDI pitch comparison)
-        offset_ratio=None,      # ignore offset
+        onset_tolerance=ONSET_TOLERANCE,
+        pitch_tolerance=PITCH_TOLERANCE,
+        offset_ratio=None,
         offset_min_tolerance=None,
     )
-    results["onset_precision"] = float(p)
-    results["onset_recall"]    = float(r)
-    results["onset_f1"]        = float(f)
+    results["note_precision"] = float(p)
+    results["note_recall"]    = float(r)
+    results["note_f1"]        = float(f)
 
-    # Tier 2: onset + offset
+    # ------------------------------------------------------------------
+    # Tier 2 — "Note with offset" F1
+    # Hawthorne 2018a Table 1: "Note w/ offset" column.
+    # ------------------------------------------------------------------
     p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
         ref_intervals=gt_intervals,
         ref_pitches=gt_pitches,
         est_intervals=pred_intervals,
         est_pitches=pred_pitches,
-        onset_tolerance=0.05,
-        pitch_tolerance=0.25,
-        offset_ratio=0.2,       # 20% of note duration
-        offset_min_tolerance=0.05,
+        onset_tolerance=ONSET_TOLERANCE,
+        pitch_tolerance=PITCH_TOLERANCE,
+        offset_ratio=OFFSET_RATIO,
+        offset_min_tolerance=OFFSET_MIN_TOLERANCE,
     )
     results["note_with_offset_precision"] = float(p)
     results["note_with_offset_recall"]    = float(r)
     results["note_with_offset_f1"]        = float(f)
 
-    # Tier 3: onset + offset + velocity (uses separate mir_eval function)
+    # ------------------------------------------------------------------
+    # Tier 3 — "Note with offset and velocity" F1
+    # Hawthorne 2018a Table 1: "Note w/ offset & velocity" column.
+    # ------------------------------------------------------------------
     p, r, f, _ = evaluate_notes_with_velocity(
         ref_intervals=gt_intervals,
         ref_pitches=gt_pitches,
@@ -237,11 +295,11 @@ def compute_note_metrics(
         est_intervals=pred_intervals,
         est_pitches=pred_pitches,
         est_velocities=pred_vels,
-        onset_tolerance=0.05,
-        pitch_tolerance=0.25,
-        offset_ratio=0.2,
-        offset_min_tolerance=0.05,
-        velocity_tolerance=0.1,
+        onset_tolerance=ONSET_TOLERANCE,
+        pitch_tolerance=PITCH_TOLERANCE,
+        offset_ratio=OFFSET_RATIO,
+        offset_min_tolerance=OFFSET_MIN_TOLERANCE,
+        velocity_tolerance=VELOCITY_TOLERANCE,
     )
     results["note_with_offset_vel_precision"] = float(p)
     results["note_with_offset_vel_recall"]    = float(r)
