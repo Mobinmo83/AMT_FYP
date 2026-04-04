@@ -61,7 +61,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 
 # ---------------------------------------------------------------------------
@@ -412,8 +412,10 @@ class Trainer:
             pos_weight_offset=pos_weight_offset,
         )
         self.optimizer  = Adam(model.parameters(), lr=lr)
-        self.scheduler  = ReduceLROnPlateau(
-            self.optimizer, mode="min", factor=0.5, patience=15, min_lr=1e-5
+        self.scheduler = StepLR(
+            self.optimizer,
+            step_size=10000,   # decay every 10k gradient steps
+            gamma=0.98,        # multiply LR by 0.98 each time
         )
         self.train_loader   = train_loader
         self.val_loader     = val_loader
@@ -465,6 +467,8 @@ class Trainer:
                 losses["total"].backward()
                 self._per_param_clip()
                 self.optimizer.step()
+            
+            self.scheduler.step()
 
             self.global_step += 1
             n_batches += 1
@@ -508,7 +512,6 @@ class Trainer:
 
         n = max(n_batches, 1)
         means = {k: v / n for k, v in totals.items()}
-        self.scheduler.step(means["total"])
         return means
 
     # -----------------------------------------------------------------------
