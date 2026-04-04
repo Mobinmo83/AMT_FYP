@@ -405,7 +405,9 @@ def run_evaluation(
 
 
         # Protocol reminder
-    print(f"\n  {'— Decoding + evaluation protocol —':^50}")
+    print(f"\n{'='*60}")
+    print(f"{'— Decoding + evaluation protocol —':^50}")
+    print(f"\n{'='*60}")
     proto = summary["eval_protocol"]
 
     print("  Decode thresholds:")
@@ -427,7 +429,7 @@ def run_evaluation(
 
     print(f"\n{'='*60}")
     print(f"  EVALUATION SUMMARY — {split} split (n={total_evaluated})")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}")
     print(f"  Dataset:    MAESTRO v3.0.0, {split} split")
     print(f"  Model:      OnsetsAndFrames (complexity={model_complexity}, "
           f"{n_params:,} params)")
@@ -463,9 +465,9 @@ def run_evaluation(
     print(f"  Avg notes/file:  pred={n_pred:.0f}  gt={n_gt:.0f}  "
           f"ratio={n_pred/n_gt:.2f}" if n_gt > 0 else "")
 
+
     print(f"\n{'='*60}")
-    # Supplementary metrics (project-specific error analysis)
-    print(f"\n  {'— Supplementary error analysis —':^50}")
+    print(f"{'— Supplementary error analysis —':^50}")
     print(f"\n{'='*60}")
     for key, label, fmt in [
         ("ea_offset_mae_ms",       "Offset MAE",           "{:.1f} ms"),
