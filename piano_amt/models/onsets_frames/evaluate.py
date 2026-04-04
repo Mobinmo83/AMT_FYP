@@ -405,9 +405,14 @@ def run_evaluation(
 
 
         # Protocol reminder
+    print('\n')
+    print('\n')
+    print('\n')
+    print('\n')
     print(f"\n{'='*60}")
     print(f"{'— Decoding + evaluation protocol —':^50}")
-    print(f"\n{'='*60}")
+    print(f"{'='*60}")
+    print('\n')
     proto = summary["eval_protocol"]
 
     print("  Decode thresholds:")
@@ -426,10 +431,11 @@ def run_evaluation(
     # ---------------------------------------------------------------------------
     # Print summary
     # ---------------------------------------------------------------------------
-
+    print('\n')
     print(f"\n{'='*60}")
     print(f"  EVALUATION SUMMARY — {split} split (n={total_evaluated})")
-    print(f"\n{'='*60}")
+    print(f"{'='*60}")
+    print('\n')
     print(f"  Dataset:    MAESTRO v3.0.0, {split} split")
     print(f"  Model:      OnsetsAndFrames (complexity={model_complexity}, "
           f"{n_params:,} params)")
@@ -441,9 +447,11 @@ def run_evaluation(
     print()
 
     # Primary metrics (paper-comparable)
+    print('\n')
     print(f"\n{'='*60}")
     print(f"  {'— Primary metrics —':^50}")
-    print(f"\n{'='*60}")
+    print(f"{'='*60}")
+    print('\n')
     print(f"  {'Metric':<35s}  {'P':>7s}  {'R':>7s}  {'F1':>7s}")
     print(f"  {'-'*60}")
     for prefix, label in [
@@ -465,10 +473,11 @@ def run_evaluation(
     print(f"  Avg notes/file:  pred={n_pred:.0f}  gt={n_gt:.0f}  "
           f"ratio={n_pred/n_gt:.2f}" if n_gt > 0 else "")
 
-
+    print('\n')
     print(f"\n{'='*60}")
     print(f"{'— Supplementary error analysis —':^50}")
-    print(f"\n{'='*60}")
+    print(f"{'='*60}")
+    print('\n')
     for key, label, fmt in [
         ("ea_offset_mae_ms",       "Offset MAE",           "{:.1f} ms"),
         ("ea_onset_mae_ms",        "Onset MAE",            "{:.1f} ms"),
