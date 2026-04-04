@@ -432,6 +432,7 @@ def run_evaluation(
     # Print summary
     # ---------------------------------------------------------------------------
     print('\n')
+    print('\n')
     print(f"\n{'='*60}")
     print(f"  EVALUATION SUMMARY — {split} split (n={total_evaluated})")
     print(f"{'='*60}")
@@ -447,6 +448,7 @@ def run_evaluation(
     print()
 
     # Primary metrics (paper-comparable)
+    print('\n')
     print('\n')
     print(f"\n{'='*60}")
     print(f"  {'— Primary metrics —':^50}")
@@ -473,6 +475,7 @@ def run_evaluation(
     print(f"  Avg notes/file:  pred={n_pred:.0f}  gt={n_gt:.0f}  "
           f"ratio={n_pred/n_gt:.2f}" if n_gt > 0 else "")
 
+    print('\n')
     print('\n')
     print(f"\n{'='*60}")
     print(f"{'— Supplementary error analysis —':^50}")
