@@ -1,0 +1,12 @@
+# Public demo notebook requirements
+huggingface_hub>=0.25.0
+librosa==0.10.1
+soundfile==0.12.1
+pretty_midi==0.2.10
+mir_eval==0.7
+ipywidgets>=8.0.0
+pandas>=2.0.0
+matplotlib>=3.8.0
+bokeh>=2.4.0
+visual_midi>=1.1.0
+torchinfo>=1.8.0
