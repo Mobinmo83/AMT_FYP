@@ -1,0 +1,14 @@
+{
+  "samples": [
+    {
+      "name": "MAESTRO Test 01",
+      "audio": "demo_assets/sample_01.wav",
+      "labels": "demo_assets/sample_01_labels.npz"
+    },
+    {
+      "name": "MAESTRO Test 02",
+      "audio": "demo_assets/sample_02.wav",
+      "labels": "demo_assets/sample_02_labels.npz"
+    }
+  ]
+}
