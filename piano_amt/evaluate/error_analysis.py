@@ -212,24 +212,13 @@ def compute_offset_mae(
     offset_threshold: float = 0.5,
 ) -> Tuple[float, float]:
     """
-    Compute mean absolute onset and offset errors (in milliseconds) for
-    correctly matched notes.
+    Compute mean absolute onset and offset errors (ms) for matched notes.
 
-    A predicted note matches a ground-truth note when:
-      - Same pitch
-      - Onset within ONSET_TOLERANCE_SEC
-
-    Args:
-        pred_onset, pred_offset: Predicted rolls (T, 88).
-        gt_onset, gt_offset:     Ground-truth rolls (T, 88).
-        fps:                     Frames per second.
-        onset_threshold:         Threshold for onset detection.
-        offset_threshold:        Threshold for offset detection.
-
-    Returns:
-        (onset_mae_ms, offset_mae_ms)  — floats in milliseconds.
+    Uses GT→pred greedy matching with pred_used tracking, consistent with
+    mir_eval reference-anchored evaluation and _compute_event_error_analysis.
+    Each pred event can be matched at most once.
     """
-    from src.constants import N_KEYS, MIN_MIDI, VELOCITY_SCALE
+    from collections import defaultdict
     from models.onsets_frames.decode import rolls_to_note_events
 
     pred_events = rolls_to_note_events(
@@ -249,30 +238,37 @@ def compute_offset_mae(
         frame_threshold=0.5,
     )
 
-    # Build GT dict keyed by pitch for fast lookup
-    gt_by_pitch: Dict[int, List] = {}
-    for e in gt_events:
-        gt_by_pitch.setdefault(e.pitch, []).append(e)
+    if not pred_events or not gt_events:
+        return 0.0, 0.0
 
-    onset_errors:  List[float] = []
+    # Build pitch index over pred events
+    pred_by_pitch = defaultdict(list)
+    for idx, e in enumerate(pred_events):
+        pred_by_pitch[e.pitch].append(idx)
+
+    pred_used = [False] * len(pred_events)
+    onset_errors: List[float] = []
     offset_errors: List[float] = []
 
-    for pred_e in pred_events:
-        candidates = gt_by_pitch.get(pred_e.pitch, [])
-        for gt_e in candidates:
-            if abs(pred_e.onset_sec - gt_e.onset_sec) <= ONSET_TOLERANCE_SEC:
-                onset_errors.append(
-                    abs(pred_e.onset_sec - gt_e.onset_sec) * 1000.0
-                )
-                offset_errors.append(
-                    abs(pred_e.offset_sec - gt_e.offset_sec) * 1000.0
-                )
-                break  # match first within tolerance
+    # GT→pred greedy match: each GT note finds closest unmatched pred note
+    for gt_e in gt_events:
+        candidates = pred_by_pitch.get(gt_e.pitch, [])
+        best_idx, best_dt = None, float("inf")
+        for ci in candidates:
+            if pred_used[ci]:
+                continue
+            dt = abs(pred_events[ci].onset_sec - gt_e.onset_sec)
+            if dt < best_dt:
+                best_dt, best_idx = dt, ci
+        if best_idx is not None and best_dt <= ONSET_TOLERANCE_SEC:
+            pred_used[best_idx] = True
+            pe = pred_events[best_idx]
+            onset_errors.append(abs(pe.onset_sec - gt_e.onset_sec) * 1000.0)
+            offset_errors.append(abs(pe.offset_sec - gt_e.offset_sec) * 1000.0)
 
     onset_mae  = float(np.mean(onset_errors))  if onset_errors  else 0.0
     offset_mae = float(np.mean(offset_errors)) if offset_errors else 0.0
     return onset_mae, offset_mae
-
 
 # ---------------------------------------------------------------------------
 # Combined entry point

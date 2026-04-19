@@ -62,13 +62,110 @@ from models.onsets_frames.decode import NoteEvent
 from src.constants import N_KEYS, N_MELS, FRAMES_PER_SECOND, MAX_SEGMENT_FRAMES
 from src.dataset import load_from_cache, _cache_path
 from evaluate.metrics import compute_metrics, get_eval_protocol
-from evaluate.error_analysis import compute_error_analysis
+# from evaluate.error_analysis import compute_error_analysis
 from evaluate.plots import plot_piano_roll_comparison
+from evaluate.metrics import compute_frame_metrics
+
+
+# ---------------------------------------------------------------------------
+# Event-level error analysis helper
+# ---------------------------------------------------------------------------
+
+def _compute_event_error_analysis(
+    pred_events,
+    gt_events,
+    onset_tolerance_sec: float = 0.05,
+    chord_window_sec: float = 0.05,
+    duplicate_window_sec: float = 0.05,
+) -> Dict:
+    """
+    Compute supplementary error-analysis metrics from decoded NoteEvent lists.
+    Replaces the raw-roll compute_error_analysis() call so that offset MAE,
+    chord completeness, and duplicate rate all reflect the post-processing config.
+    """
+    result = {
+        "offset_mae_ms": 0.0,
+        "onset_mae_ms": 0.0,
+        "chord_completeness": 0.0,
+        "duplicate_note_rate": 0.0,
+    }
+
+    if not pred_events or not gt_events:
+        return result
+
+    from collections import defaultdict
+
+    # Build pitch index over pred events for fast lookup
+    pred_by_pitch = defaultdict(list)
+    for idx, e in enumerate(pred_events):
+        pred_by_pitch[e.pitch].append(idx)
+
+    pred_used = [False] * len(pred_events)
+    offset_errs, onset_errs = [], []
+
+    # Greedy match: each GT event finds closest unmatched pred event at same pitch
+    for ge in gt_events:
+        candidates = pred_by_pitch.get(ge.pitch, [])
+        best_idx, best_dt = None, float("inf")
+        for ci in candidates:
+            if pred_used[ci]:
+                continue
+            dt = abs(pred_events[ci].onset_sec - ge.onset_sec)
+            if dt < best_dt:
+                best_dt, best_idx = dt, ci
+        if best_idx is not None and best_dt <= onset_tolerance_sec:
+            pred_used[best_idx] = True
+            pe = pred_events[best_idx]
+            onset_errs.append(abs(pe.onset_sec - ge.onset_sec) * 1000)
+            offset_errs.append(abs(pe.offset_sec - ge.offset_sec) * 1000)
+
+    if onset_errs:
+        result["onset_mae_ms"] = float(np.mean(onset_errs))
+    if offset_errs:
+        result["offset_mae_ms"] = float(np.mean(offset_errs))
+
+    # Chord completeness: for each GT chord (>=2 simultaneous notes),
+    # what fraction of tones appear in pred?
+    chord_scores = []
+    gt_sorted = sorted(gt_events, key=lambda e: e.onset_sec)
+    i = 0
+    while i < len(gt_sorted):
+        chord = [gt_sorted[i]]
+        j = i + 1
+        while j < len(gt_sorted) and (gt_sorted[j].onset_sec - gt_sorted[i].onset_sec) <= chord_window_sec:
+            chord.append(gt_sorted[j])
+            j += 1
+        if len(chord) >= 2:
+            found = sum(
+                1 for tone in chord
+                if any(
+                    pe.pitch == tone.pitch and abs(pe.onset_sec - tone.onset_sec) <= onset_tolerance_sec
+                    for pe in pred_events
+                )
+            )
+            chord_scores.append(found / len(chord))
+        i = j
+
+    if chord_scores:
+        result["chord_completeness"] = float(np.mean(chord_scores))
+
+    # Duplicate note rate: pred events with same pitch within window of each other
+    n_dups = 0
+    pred_sorted = sorted(pred_events, key=lambda e: (e.pitch, e.onset_sec))
+    for k in range(1, len(pred_sorted)):
+        prev, curr = pred_sorted[k - 1], pred_sorted[k]
+        if curr.pitch == prev.pitch and (curr.onset_sec - prev.onset_sec) <= duplicate_window_sec:
+            n_dups += 1
+    result["duplicate_note_rate"] = n_dups / len(pred_events) if pred_events else 0.0
+
+    return result
 
 
 # ---------------------------------------------------------------------------
 # Per-file evaluation (advanced version)
 # ---------------------------------------------------------------------------
+
+
 
 def evaluate_file_advanced(
     model:      OnsetsAndFrames,
@@ -114,23 +211,10 @@ def evaluate_file_advanced(
         pred_velocity = out["velocity"][0].cpu()
 
     # Standard metrics using original decode (for fair comparison baseline)
-    metrics = compute_metrics(
-        pred_onset=pred_onset,
+    metrics = compute_frame_metrics(
         pred_frame=pred_frame,
-        pred_offset=pred_offset,
-        pred_velocity=pred_velocity,
-        gt_onset=gt_onset,
         gt_frame=gt_frame,
-        gt_offset=gt_offset,
-        gt_velocity=gt_velocity,
-        onset_threshold=onset_threshold,
         frame_threshold=frame_threshold,
-        offset_threshold=offset_threshold,
-        onset_tolerance=onset_tolerance,
-        offset_ratio=offset_ratio,
-        offset_min_tolerance=offset_min_tolerance,
-        velocity_tolerance=velocity_tolerance,
-        fps=FRAMES_PER_SECOND,
     )
 
     # ---- Advanced: decode with post-processing ----
@@ -176,8 +260,10 @@ def evaluate_file_advanced(
         gt_int, gt_pit, gt_vel = events_to_mir(gt_events)
 
         adv_metrics = {}
-        adv_metrics["adv_n_pred_notes"] = len(pred_pit)
-        adv_metrics["adv_n_gt_notes"] = len(gt_pit)
+        adv_metrics["adv_n_pred_notes"] = len(pred_pit)   # keep for trace
+        adv_metrics["adv_n_gt_notes"] = len(gt_pit)        # keep for trace
+        adv_metrics["n_pred_notes"] = len(pred_pit)        # overwrite standard key
+        adv_metrics["n_gt_notes"] = len(gt_pit)            # overwrite standard key
 
         if len(pred_pit) > 0 and len(gt_pit) > 0:
             # Tier 1: Note F1
@@ -189,8 +275,13 @@ def evaluate_file_advanced(
                 offset_ratio=None, offset_min_tolerance=None,
             )
             adv_metrics["adv_note_precision"] = float(p)
+            adv_metrics["note_precision"] = float(p)           # overwrite standard key
+
             adv_metrics["adv_note_recall"] = float(r)
+            adv_metrics["note_recall"] = float(r)
+
             adv_metrics["adv_note_f1"] = float(f)
+            adv_metrics["note_f1"] = float(f)
 
             # Tier 2: Note+Offset F1
             p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
@@ -202,9 +293,11 @@ def evaluate_file_advanced(
                 offset_min_tolerance=offset_min_tolerance,
             )
             adv_metrics["adv_note_with_offset_precision"] = float(p)
+            adv_metrics["note_with_offset_precision"] = float(p)
             adv_metrics["adv_note_with_offset_recall"] = float(r)
+            adv_metrics["note_with_offset_recall"] = float(r)
             adv_metrics["adv_note_with_offset_f1"] = float(f)
-
+            adv_metrics["note_with_offset_f1"] = float(f)
             # Tier 3: Note+Offset+Velocity F1
             p, r, f, _ = eval_vel(
                 ref_intervals=gt_int, ref_pitches=gt_pit, ref_velocities=gt_vel,
@@ -216,13 +309,22 @@ def evaluate_file_advanced(
                 velocity_tolerance=velocity_tolerance,
             )
             adv_metrics["adv_note_with_offset_vel_precision"] = float(p)
+            adv_metrics["note_with_offset_vel_precision"] = float(p)
             adv_metrics["adv_note_with_offset_vel_recall"] = float(r)
+            adv_metrics["note_with_offset_vel_recall"] = float(r)
             adv_metrics["adv_note_with_offset_vel_f1"] = float(f)
+            adv_metrics["note_with_offset_vel_f1"] = float(f)
         else:
             for k in ["adv_note_precision", "adv_note_recall", "adv_note_f1",
                        "adv_note_with_offset_precision", "adv_note_with_offset_recall",
                        "adv_note_with_offset_f1", "adv_note_with_offset_vel_precision",
                        "adv_note_with_offset_vel_recall", "adv_note_with_offset_vel_f1"]:
+                adv_metrics[k] = 0.0
+            for k in ["note_precision", "note_recall", "note_f1",
+                       "note_with_offset_precision", "note_with_offset_recall",
+                       "note_with_offset_f1", "note_with_offset_vel_precision",
+                       "note_with_offset_vel_recall", "note_with_offset_vel_f1",
+                       "n_pred_notes", "n_gt_notes"]:
                 adv_metrics[k] = 0.0
 
         metrics.update(adv_metrics)
@@ -230,16 +332,11 @@ def evaluate_file_advanced(
     except ImportError:
         print("WARNING: mir_eval not installed — advanced note metrics skipped.")
 
-    # Error analysis (project-specific)
-    ea = compute_error_analysis(
-        pred_onset=pred_onset,
-        pred_frame=pred_frame,
-        pred_offset=pred_offset,
-        gt_onset=gt_onset,
-        gt_frame=gt_frame,
-        gt_offset=gt_offset,
-        onset_threshold=onset_threshold,
-        fps=FRAMES_PER_SECOND,
+    # Error analysis — event-level, reflects the chosen post-processing config.
+    # Uses pred_events_advanced (already decoded above), not raw rolls.
+    ea = _compute_event_error_analysis(
+        pred_events=pred_events_advanced,
+        gt_events=gt_events,
     )
     metrics["error_analysis"] = ea
 
