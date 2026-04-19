@@ -289,6 +289,7 @@ def run_advanced_evaluation(
     save_plots: bool = False,
     onset_threshold: float = 0.5,
     frame_threshold: float = 0.5,
+    offset_threshold: float = 0.5,
     model_complexity: int = 48,
     onset_tolerance: float = 0.05,
     offset_ratio: float = 0.2,
@@ -425,6 +426,7 @@ def run_advanced_evaluation(
             onset_threshold=onset_threshold,
             frame_threshold=frame_threshold,
             onset_tolerance=onset_tolerance,
+            offset_threshold=offset_threshold,
             offset_ratio=offset_ratio,
             offset_min_tolerance=offset_min_tolerance,
             velocity_tolerance=velocity_tolerance,
@@ -464,6 +466,7 @@ def run_advanced_evaluation(
                 output_path=midi_dir / f"{stem}.mid",
                 fps=FRAMES_PER_SECOND,
                 onset_threshold=onset_threshold,
+                offset_threshold=offset_threshold,
                 frame_threshold=frame_threshold,
                 **pp_kwargs,
             )
@@ -494,6 +497,9 @@ def run_advanced_evaluation(
     summary["checkpoint"] = str(checkpoint_path)
     summary["model_complexity"] = model_complexity
     summary["model_parameters"] = n_params
+    summary["onset_threshold"] = onset_threshold
+    summary["frame_threshold"] = frame_threshold
+    summary["offset_threshold"] = offset_threshold
     summary["eval_time_total_s"] = round(eval_elapsed, 1)
     summary["eval_strategy"] = "full_length_single_pass_advanced"
     summary["post_processing"] = pp_kwargs
@@ -505,6 +511,7 @@ def run_advanced_evaluation(
     )
     summary["gpu_info"] = gpu_info
     summary["train_epochs"] = ckpt.get("epoch", None)
+    
 
     # Save
     with open(eval_dir / "summary_metrics.json", "w") as f:
