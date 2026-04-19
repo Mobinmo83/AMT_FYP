@@ -330,9 +330,16 @@ def remove_duplicate_notes(
                 group.append(pitch_events[j])
                 j += 1
 
-            # Keep the one with highest velocity
+
+            # Keep onset and velocity from the loudest detection
             best = max(group, key=lambda e: e.velocity)
-            cleaned.append(best)
+            # Take the longest offset from the group (recovers offset F1)
+            max_group_offset = max(e.offset_sec for e in group)
+            # Safety cap: don't extend more than 200ms past the best candidate's
+            # own offset — protects against dedup window catching a separate note
+            safety_cap = best.offset_sec + 0.200
+            merged_offset = min(max_group_offset, safety_cap)
+            cleaned.append(best._replace(offset_sec=merged_offset))
 
             i = j  # Skip past the group
 
