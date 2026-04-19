@@ -274,6 +274,17 @@ def _get_gpu_info() -> Dict[str, str]:
     return info
 
 
+def _pick_metric(summary: Dict, adv_key: str, base_key: str) -> float:
+    val = summary.get(adv_key, None)
+    if val is not None:
+        return float(val)
+    return float(summary.get(base_key, 0.0))
+
+
+def _on_off(flag: bool) -> str:
+    return "ON" if flag else "OFF"
+
+
 # ---------------------------------------------------------------------------
 # Main advanced evaluation loop
 # ---------------------------------------------------------------------------
@@ -473,9 +484,10 @@ def run_advanced_evaluation(
 
     # Compute summary
     eval_elapsed = time.time() - eval_start_time
+    total_requested = len(split_df)
     total_evaluated = len(all_metrics)
-    print(f"\n  Evaluated {total_evaluated}/{len(split_df)} files"
-          + (f" ({skipped} skipped)" if skipped > 0 else "")
+    print(f"\n  Evaluated {total_evaluated}/{total_requested} files"
+          + (f" ({skipped} skipped — no cache)" if skipped > 0 else "")
           + f" in {eval_elapsed:.1f}s")
 
     if not all_metrics:
@@ -491,7 +503,9 @@ def run_advanced_evaluation(
         summary[k] = float(np.mean(vals)) if vals else 0.0
 
     # Metadata
+     # Metadata
     summary["n_files"] = total_evaluated
+    summary["n_files_in_split"] = total_in_split
     summary["split"] = split
     summary["config_name"] = config_name
     summary["checkpoint"] = str(checkpoint_path)
@@ -502,6 +516,11 @@ def run_advanced_evaluation(
     summary["offset_threshold"] = offset_threshold
     summary["eval_time_total_s"] = round(eval_elapsed, 1)
     summary["eval_strategy"] = "full_length_single_pass_advanced"
+
+    summary["dataset"] = "MAESTRO"
+    summary["dataset_version"] = "v3.0.0"
+    summary["maestro_root"] = str(maestro_root)
+
     summary["post_processing"] = pp_kwargs
     summary["eval_protocol"] = get_eval_protocol(
         onset_tolerance=onset_tolerance,
@@ -510,7 +529,14 @@ def run_advanced_evaluation(
         velocity_tolerance=velocity_tolerance,
     )
     summary["gpu_info"] = gpu_info
+
     summary["train_epochs"] = ckpt.get("epoch", None)
+    summary["train_val_loss"] = ckpt.get("val_loss", None)
+    summary["train_best_val_loss"] = ckpt.get("best_val_loss", None)
+
+    # Helpful trace fields
+    summary["note_metric_source"] = "advanced_decoder"
+    summary["frame_metric_source"] = "standard_frame_metric_path"
     
 
     # Save
@@ -520,37 +546,132 @@ def run_advanced_evaluation(
         json.dump(per_file, f, indent=2)
 
     # Print results
-    print(f"\n{'=' * 60}")
-    print(f"  ADVANCED EVALUATION — {split} split — config: {config_name}")
-    print(f"{'=' * 60}\n")
+    # ---------------------------------------------------------------------------
+    # Print results (same style as original evaluator, but using advanced note metrics)
+    # ---------------------------------------------------------------------------
 
-    # Compare original vs advanced
-    print(f"  {'Metric':<35s}  {'Orig F1':>8s}  {'Adv F1':>8s}  {'Δ':>8s}")
-    print(f"  {'-' * 65}")
+    adv_note_p = _pick_metric(summary, "adv_note_precision", "note_precision")
+    adv_note_r = _pick_metric(summary, "adv_note_recall", "note_recall")
+    adv_note_f = _pick_metric(summary, "adv_note_f1", "note_f1")
 
-    for orig_key, adv_key, label in [
-        ("note_f1", "adv_note_f1", "Note (onset+pitch)"),
-        ("note_with_offset_f1", "adv_note_with_offset_f1", "Note w/ offset"),
-        ("note_with_offset_vel_f1", "adv_note_with_offset_vel_f1", "Note w/ offset+vel"),
-    ]:
-        orig = summary.get(orig_key, 0)
-        adv = summary.get(adv_key, 0)
-        delta = adv - orig
-        sign = "+" if delta >= 0 else ""
-        print(f"  {label:<35s}  {orig:>8.4f}  {adv:>8.4f}  {sign}{delta:>7.4f}")
+    adv_off_p = _pick_metric(summary, "adv_note_with_offset_precision", "note_with_offset_precision")
+    adv_off_r = _pick_metric(summary, "adv_note_with_offset_recall", "note_with_offset_recall")
+    adv_off_f = _pick_metric(summary, "adv_note_with_offset_f1", "note_with_offset_f1")
 
-    print(f"\n  Frame F1: {summary.get('frame_f1', 0):.4f}")
-    print(f"\n  Supplementary:")
+    adv_vel_p = _pick_metric(summary, "adv_note_with_offset_vel_precision", "note_with_offset_vel_precision")
+    adv_vel_r = _pick_metric(summary, "adv_note_with_offset_vel_recall", "note_with_offset_vel_recall")
+    adv_vel_f = _pick_metric(summary, "adv_note_with_offset_vel_f1", "note_with_offset_vel_f1")
+
+    adv_n_pred = _pick_metric(summary, "adv_n_pred_notes", "n_pred_notes")
+    adv_n_gt = _pick_metric(summary, "adv_n_gt_notes", "n_gt_notes")
+
+    print('\n')
+    print('\n')
+    print('\n')
+    print('\n')
+    print(f"\n{'='*60}")
+    print(f"{'— Post-processing configuration —':^50}")
+    print(f"{'='*60}")
+    print()
+
+    print(f"  Config name:  {config_name}")
+    print(f"  Note metrics: advanced decoder")
+    print(f"  Frame metric: original frame path")
+    print()
+
+    print(f"  Method 1  Onset-conditioned offset : {_on_off(use_onset_conditioned_offset)}")
+    print(f"            offset_threshold         : {offset_threshold:.2f}")
+    print(f"  Method 2  Frame smoothing          : {_on_off(use_frame_smoothing)}")
+    print(f"            smoothing_kernel         : {frame_smoothing_kernel}")
+    print(f"            smoothing_method         : {frame_smoothing_method}")
+    print(f"  Method 3  Min note duration        : {min_note_duration_ms:.1f} ms")
+    print(f"  Method 4  Duplicate removal        : {_on_off(use_duplicate_removal)}")
+    print(f"            duplicate_tolerance      : {duplicate_tolerance_sec*1000:.1f} ms")
+    print(f"  Method 5  Chord grouping           : {_on_off(use_chord_grouping)}")
+    print(f"            chord_tolerance          : {chord_tolerance_sec*1000:.1f} ms")
+    print(f"            chord_snap_to            : {chord_snap_to}")
+    print(f"  Method 6  Adaptive thresholds      : {_on_off(use_adaptive_thresholds)}")
+    print(f"            adaptive_onset_k         : {adaptive_onset_k:.3f}")
+    print(f"            adaptive_frame_k         : {adaptive_frame_k:.3f}")
+    print(f"  Method 7  Pedal extension          : {_on_off(use_pedal_extension)}")
+    print(f"            pedal_energy_threshold   : {pedal_energy_threshold:.3f}")
+    print(f"            pedal_max_extension_sec  : {pedal_max_extension_sec:.3f}")
+
+    print('\n')
+    print('\n')
+    print(f"\n{'='*60}")
+    print(f"{'— Decoding + evaluation protocol —':^50}")
+    print(f"{'='*60}")
+    print()
+    proto = summary["eval_protocol"]
+
+    print("  Decode thresholds:")
+    print(f"    onset_threshold:   {summary['onset_threshold']:.2f}")
+    print(f"    frame_threshold:   {summary['frame_threshold']:.2f}")
+    print(f"    offset_threshold:  {summary['offset_threshold']:.2f}")
+
+    print("  Evaluation tolerances:")
+    print(f"    onset_tolerance:   {proto['onset_tolerance_s']*1000:.0f} ms")
+    print(f"    pitch_tolerance:   {proto['pitch_tolerance_raw']:.2f} "
+          f"({proto['pitch_tolerance_cents']:.0f} cents)")
+    print(f"    offset_ratio:      {proto['offset_ratio']}")
+    print(f"    offset_min_tol:    {proto['offset_min_tolerance_s']*1000:.0f} ms")
+    print(f"    velocity_tolerance:{proto['velocity_tolerance']}")
+    print(f"    mir_eval version:  {proto['mir_eval_version']}")
+
+    print('\n')
+    print('\n')
+    print(f"\n{'='*60}")
+    print(f"  EVALUATION SUMMARY — {split} split (n={total_evaluated})")
+    print(f"{'='*60}")
+    print()
+
+    print(f"  Dataset:    MAESTRO v3.0.0, {split} split")
+    print(f"  Model:      OnsetsAndFrames (complexity={model_complexity}, {n_params:,} params)")
+    print(f"  Checkpoint: epoch {ckpt.get('epoch','?')}, val_loss={ckpt.get('val_loss',0):.4f}")
+    print(f"  Config:     {config_name}")
+    print(f"  GPU:        {gpu_info.get('device', 'cpu')}")
+    print(f"  Eval time:  {eval_elapsed:.1f}s ({eval_elapsed/total_evaluated:.1f}s/file)")
+    print()
+
+    print('\n')
+    print('\n')
+    print(f"\n{'='*60}")
+    print(f"  {'— Primary metrics —':^50}")
+    print(f"{'='*60}")
+    print()
+
+    print(f"  {'Metric':<35s}  {'P':>7s}  {'R':>7s}  {'F1':>7s}")
+    print(f"  {'-'*60}")
+
+    print(f"  {'Note (onset+pitch)':<35s}  {adv_note_p:>7.4f}  {adv_note_r:>7.4f}  {adv_note_f:>7.4f}")
+    print(f"  {'Note w/ offset':<35s}      {adv_off_p:>7.4f}  {adv_off_r:>7.4f}  {adv_off_f:>7.4f}")
+    print(f"  {'Note w/ offset+vel':<35s}  {adv_vel_p:>7.4f}  {adv_vel_r:>7.4f}  {adv_vel_f:>7.4f}")
+    print(f"  {'Frame':<35s}               {summary.get('frame_precision', 0):>7.4f}  "
+          f"{summary.get('frame_recall', 0):>7.4f}  {summary.get('frame_f1', 0):>7.4f}")
+
+    print()
+
+    if adv_n_gt > 0:
+        print(f"  Avg notes/file:  pred={adv_n_pred:.0f}  gt={adv_n_gt:.0f}  ratio={adv_n_pred/adv_n_gt:.2f}")
+
+    print('\n')
+    print('\n')
+    print(f"\n{'='*60}")
+    print(f"{'— Supplementary error analysis —':^50}")
+    print(f"{'='*60}")
+    print()
+
     for key, label, fmt in [
-        ("ea_offset_mae_ms", "Offset MAE", "{:.1f} ms"),
-        ("ea_onset_mae_ms", "Onset MAE", "{:.1f} ms"),
-        ("ea_chord_completeness", "Chord completeness", "{:.4f}"),
-        ("ea_duplicate_note_rate", "Duplicate note rate", "{:.4f}"),
+        ("ea_offset_mae_ms",       "Offset MAE",            "{:.1f} ms"),
+        ("ea_onset_mae_ms",        "Onset MAE",             "{:.1f} ms"),
+        ("ea_chord_completeness",  "Chord completeness",    "{:.4f}"),
+        ("ea_duplicate_note_rate", "Duplicate note rate",   "{:.4f}"),
     ]:
         val = summary.get(key, 0)
-        print(f"    {label:<25s}  {fmt.format(val)}")
+        print(f"  {label:<35s}  {fmt.format(val)}")
 
     print(f"\n  Results saved → {eval_dir}")
-    print(f"{'=' * 60}\n")
+    print(f"{'='*60}\n")
 
     return summary
