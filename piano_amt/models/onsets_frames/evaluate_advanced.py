@@ -742,12 +742,12 @@ def run_advanced_evaluation(
     print(f"  {'-'*60}")
 
     print(f"  {'Note (onset+pitch)':<35s}  {adv_note_p:>7.4f}  {adv_note_r:>7.4f}  {adv_note_f:>7.4f}")
-    print(f"  {'Note w/ offset':<35s}      {adv_off_p:>7.4f}  {adv_off_r:>7.4f}  {adv_off_f:>7.4f}")
+    print(f"  {'Note w/ offset':<35s}  {adv_off_p:>7.4f}  {adv_off_r:>7.4f}  {adv_off_f:>7.4f}")
     print(f"  {'Note w/ offset+vel':<35s}  {adv_vel_p:>7.4f}  {adv_vel_r:>7.4f}  {adv_vel_f:>7.4f}")
-    print(f"  {'Frame':<35s}               {summary.get('frame_precision', 0):>7.4f}  "
-          f"{summary.get('frame_recall', 0):>7.4f}  {summary.get('frame_f1', 0):>7.4f}")
-
-    print()
+    print(f"  {'Frame':<35s}  {summary.get('frame_precision', 0):>7.4f}  "
+        f"{summary.get('frame_recall', 0):>7.4f}  {summary.get('frame_f1', 0):>7.4f}")
+    print('\n')
+    print(f"  {'-'*60}")
 
     if adv_n_gt > 0:
         print(f"  Avg notes/file:  pred={adv_n_pred:.0f}  gt={adv_n_gt:.0f}  ratio={adv_n_pred/adv_n_gt:.2f}")
