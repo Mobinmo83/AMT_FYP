@@ -228,8 +228,8 @@ def evaluate_file_advanced(
         effective_onset_threshold, effective_frame_threshold = compute_adaptive_thresholds(
             onset_roll=pred_onset,
             frame_roll=pred_frame,
-            base_onset_threshold=onset_threshold,
-            base_frame_threshold=frame_threshold,
+            onset_base=onset_threshold,
+            frame_base=frame_threshold,
             onset_k=pp_kwargs.get("adaptive_onset_k", 0.5),
             frame_k=pp_kwargs.get("adaptive_frame_k", 0.5),
         )
@@ -303,8 +303,9 @@ def evaluate_file_advanced(
             if (ev.offset_sec - ev.onset_sec) >= _MIN_DUR
         ]
         if len(pred_events_advanced) != _n_before:
-            print(f"  [warn] dropped {_n_before - len(pred_events_advanced)} "
-                  f"degenerate events ({cache_path.stem})")
+            # Accumulate silently; summarise at end of evaluation run.
+            _dropped = _n_before - len(pred_events_advanced)
+            metrics["_n_degenerate_dropped"] = _dropped
 
         pred_int, pred_pit, pred_vel = events_to_mir(pred_events_advanced)
         gt_int, gt_pit, gt_vel = events_to_mir(gt_events)
