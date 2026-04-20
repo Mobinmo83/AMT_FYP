@@ -210,15 +210,49 @@ def evaluate_file_advanced(
         pred_offset = out["offset"][0].cpu()
         pred_velocity = out["velocity"][0].cpu()
 
-    # Standard metrics using original decode (for fair comparison baseline)
+    # ---- Apply frame-level pre-processing BEFORE computing Frame F1 ----
+    # These steps modify the frame roll and/or thresholds and must be
+    # applied here so that Frame F1 reflects the same post-processing
+    # view that the note decoder will use.
+    from models.onsets_frames.decode_advanced import (
+        smooth_frame_roll,
+        compute_adaptive_thresholds,
+    )
+
+    effective_onset_threshold = onset_threshold
+    effective_frame_threshold = frame_threshold
+    frame_roll_for_metrics = pred_frame
+
+    # Method 6: adaptive thresholds (per-piece, based on activation stats)
+    if pp_kwargs.get("use_adaptive_thresholds", False):
+        effective_onset_threshold, effective_frame_threshold = compute_adaptive_thresholds(
+            onset_roll=pred_onset,
+            frame_roll=pred_frame,
+            base_onset_threshold=onset_threshold,
+            base_frame_threshold=frame_threshold,
+            onset_k=pp_kwargs.get("adaptive_onset_k", 0.5),
+            frame_k=pp_kwargs.get("adaptive_frame_k", 0.5),
+        )
+
+    # Method 2: frame-level smoothing (median filter, etc.)
+    if pp_kwargs.get("use_frame_smoothing", False):
+        frame_roll_for_metrics = smooth_frame_roll(
+            frame_roll=pred_frame,
+            kernel_size=pp_kwargs.get("frame_smoothing_kernel", 7),
+            method=pp_kwargs.get("frame_smoothing_method", "median"),
+        )
+
+    # Frame F1 now sees the post-processed roll + post-processed threshold
     metrics = compute_frame_metrics(
-        pred_frame=pred_frame,
+        pred_frame=frame_roll_for_metrics,
         gt_frame=gt_frame,
-        frame_threshold=frame_threshold,
+        frame_threshold=effective_frame_threshold,
     )
 
     # ---- Advanced: decode with post-processing ----
-    # Decode predicted events using advanced method
+    # Note: the decoder re-applies smoothing/adaptive internally from pp_kwargs.
+    # For median filtering this is idempotent, so it's harmless but slightly
+    # wasteful. If you want to avoid the double-work, see the note below.
     pred_events_advanced = advanced_rolls_to_note_events(
         onset_roll=pred_onset,
         frame_roll=pred_frame,
@@ -230,6 +264,7 @@ def evaluate_file_advanced(
         offset_threshold=offset_threshold,
         **pp_kwargs,
     )
+
 
     # Decode GT events (using standard decode, no post-processing)
     from models.onsets_frames.decode import rolls_to_note_events
@@ -248,6 +283,7 @@ def evaluate_file_advanced(
         from mir_eval.transcription_velocity import precision_recall_f1_overlap as eval_vel
 
         # Convert events to mir_eval format
+       # Convert events to mir_eval format
         def events_to_mir(events):
             if not events:
                 return np.zeros((0, 2)), np.zeros(0), np.zeros(0)
@@ -255,6 +291,20 @@ def evaluate_file_advanced(
             pitches = np.array([float(e.pitch) for e in events])
             velocities = np.array([float(e.velocity) for e in events])
             return intervals, pitches, velocities
+
+        # Defensive filter: drop any zero/negative-duration events before
+        # passing to mir_eval. After the decoder fix this should never
+        # fire — if it does, post-processing is producing degenerate
+        # events and the warning tells you which file to investigate.
+        _MIN_DUR = 1.0 / FRAMES_PER_SECOND
+        _n_before = len(pred_events_advanced)
+        pred_events_advanced = [
+            ev for ev in pred_events_advanced
+            if (ev.offset_sec - ev.onset_sec) >= _MIN_DUR
+        ]
+        if len(pred_events_advanced) != _n_before:
+            print(f"  [warn] dropped {_n_before - len(pred_events_advanced)} "
+                  f"degenerate events ({cache_path.stem})")
 
         pred_int, pred_pit, pred_vel = events_to_mir(pred_events_advanced)
         gt_int, gt_pit, gt_vel = events_to_mir(gt_events)

@@ -62,6 +62,7 @@ from src.constants import FRAMES_PER_SECOND, MIN_MIDI, N_KEYS, VELOCITY_SCALE
 
 # Import original NoteEvent for compatibility
 from models.onsets_frames.decode import NoteEvent
+from scipy.ndimage import gaussian_filter1d
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +83,8 @@ def smooth_frame_roll(
     Args:
         frame_roll: (T, 88) frame probabilities in [0,1].
         kernel_size: Size of the smoothing window (must be odd).
-        method: "median" for median filter, "closing" for morphological closing.
+        method: "median" for median filter, "gaussian" for Gaussian filter,
+                "closing" for morphological closing.
 
     Returns:
         Smoothed frame roll (T, 88).
@@ -122,6 +124,22 @@ def smooth_frame_roll(
             # Blend: use eroded binary as mask, keep original probabilities
             smoothed[:, key] = frame_np[:, key] * eroded + \
                                frame_np[:, key] * 0.5 * (1 - eroded)
+            
+    elif method == "gaussian":
+        # Gaussian smoothing along time axis for each key.
+        # sigma derived from kernel_size so the parameter means roughly
+        # the same thing as in the median filter (effective window width).
+        sigma = max(kernel_size / 4.0, 0.5)
+        for key in range(K):
+            smoothed[:, key] = gaussian_filter1d(frame_np[:, key], sigma=sigma)
+
+    else:
+        raise ValueError(
+            f"Unknown smoothing method: {method!r}. "
+            f"Expected 'median', 'gaussian', or 'closing'."
+        )
+
+    
 
     return torch.from_numpy(smoothed).float()
 
@@ -475,6 +493,18 @@ def extend_offsets_for_pedal(
                     break
 
             new_offset_sec = new_offset_frame / fps
+
+            # Invariant 1: extension can only lengthen, never shorten.
+            # Frame-index truncation on line 482 can collapse short notes
+            # such that new_offset_sec < e.offset_sec. Clamp to the original.
+            new_offset_sec = max(new_offset_sec, e.offset_sec)
+
+            # Invariant 2: duration must be strictly positive.
+            # mir_eval rejects intervals where offset <= onset. Guarantee
+            # at least one frame of duration past the onset.
+            MIN_DUR = 1.0 / fps
+            new_offset_sec = max(new_offset_sec, e.onset_sec + MIN_DUR)
+
             extended.append(NoteEvent(
                 onset_sec=e.onset_sec,
                 offset_sec=new_offset_sec,
