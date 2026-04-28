@@ -280,32 +280,75 @@ def evaluate_prediction_vs_gt(
 
 def main_scores_table(results: Dict[str, Dict[str, float]]) -> pd.DataFrame:
     m = results["metrics"]
+
     return pd.DataFrame([
         {
-            "Metric": "Note",
+            "Evaluation metric": "Note",
             "Precision": m.get("note_precision", 0.0),
             "Recall": m.get("note_recall", 0.0),
-            "F1": m.get("note_f1", 0.0),
+            "F1-score": m.get("note_f1", 0.0),
         },
         {
-            "Metric": "Note + offset",
+            "Evaluation metric": "Note + offset",
             "Precision": m.get("note_with_offset_precision", 0.0),
             "Recall": m.get("note_with_offset_recall", 0.0),
-            "F1": m.get("note_with_offset_f1", 0.0),
+            "F1-score": m.get("note_with_offset_f1", 0.0),
         },
         {
-            "Metric": "Note + offset + velocity",
+            "Evaluation metric": "Note + offset + velocity",
             "Precision": m.get("note_with_offset_vel_precision", 0.0),
             "Recall": m.get("note_with_offset_vel_recall", 0.0),
-            "F1": m.get("note_with_offset_vel_f1", 0.0),
+            "F1-score": m.get("note_with_offset_vel_f1", 0.0),
         },
         {
-            "Metric": "Frame",
+            "Evaluation metric": "Frame",
             "Precision": m.get("frame_precision", 0.0),
             "Recall": m.get("frame_recall", 0.0),
-            "F1": m.get("frame_f1", 0.0),
+            "F1-score": m.get("frame_f1", 0.0),
         },
     ])
+
+
+def style_main_scores_table(df: pd.DataFrame):
+    """Clean notebook display for the four main transcription metrics."""
+    return (
+        df.style
+        .hide(axis="index")
+        .format({
+            "Precision": "{:.2f}",
+            "Recall": "{:.2f}",
+            "F1-score": "{:.2f}",
+        })
+        .set_properties(**{
+            "text-align": "center",
+            "font-size": "13px",
+            "padding": "6px",
+        })
+        .set_table_styles([
+            {
+                "selector": "th",
+                "props": [
+                    ("text-align", "center"),
+                    ("font-weight", "bold"),
+                    ("font-size", "13px"),
+                    ("padding", "6px"),
+                ],
+            },
+            {
+                "selector": "td",
+                "props": [
+                    ("border", "1px solid #ddd"),
+                ],
+            },
+            {
+                "selector": "table",
+                "props": [
+                    ("border-collapse", "collapse"),
+                    ("margin", "8px 0"),
+                ],
+            },
+        ])
+    )
 
 
 def supplementary_table(results: Dict[str, Dict[str, float]]) -> pd.DataFrame:
