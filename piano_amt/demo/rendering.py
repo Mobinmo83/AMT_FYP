@@ -7,9 +7,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pretty_midi
 import soundfile as sf
+from matplotlib.patches import Rectangle
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
 
 from demo.demo_config import DEFAULT_SF2_PATHS, SAMPLE_RATE
 from demo.inference import DemoNoteEvent
+from src.constants import FRAMES_PER_SECOND
 
 
 PIANO_PROGRAMS = {
@@ -209,6 +213,319 @@ def plot_note_events_colored(
     return fig
 
 
+DEMO_FPS = float(FRAMES_PER_SECOND)
+
+
+def _event_to_fields(event):
+    """Convert a note event into onset_sec, offset_sec, pitch, velocity.
+
+    Supports the public-demo DemoNoteEvent object and a few fallback formats.
+    """
+    # Main format used by this demo.
+    if hasattr(event, "onset_sec") and hasattr(event, "offset_sec"):
+        return (
+            float(getattr(event, "onset_sec")),
+            float(getattr(event, "offset_sec")),
+            int(getattr(event, "pitch")),
+            float(getattr(event, "velocity", 64)),
+        )
+
+    # Dict fallback.
+    if isinstance(event, dict):
+        onset = event.get("onset_sec", event.get("onset_time", event.get("start_time", event.get("onset", event.get("start")))))
+        offset = event.get("offset_sec", event.get("offset_time", event.get("end_time", event.get("offset", event.get("end")))))
+        pitch = event.get("pitch", event.get("midi_note", event.get("note")))
+        velocity = event.get("velocity", 64)
+
+        if onset is None or offset is None or pitch is None:
+            raise ValueError(f"Unsupported note-event dictionary format: {event}")
+
+        return float(onset), float(offset), int(pitch), float(velocity)
+
+    # Alternative object names fallback.
+    if hasattr(event, "onset_time") or hasattr(event, "offset_time"):
+        onset = getattr(event, "onset_time", getattr(event, "start_time", getattr(event, "onset", None)))
+        offset = getattr(event, "offset_time", getattr(event, "end_time", getattr(event, "offset", None)))
+        pitch = getattr(event, "midi_note", getattr(event, "pitch", getattr(event, "note", None)))
+        velocity = getattr(event, "velocity", 64)
+
+        if onset is None or offset is None or pitch is None:
+            raise ValueError(f"Unsupported note-event object format: {event}")
+
+        return float(onset), float(offset), int(pitch), float(velocity)
+
+    # Tuple/list fallback: assume (onset, offset, pitch, velocity).
+    vals = list(event)
+    if len(vals) < 4:
+        raise ValueError(f"Unsupported note-event format: {event}")
+
+    onset, offset, pitch, velocity = vals[:4]
+    return float(onset), float(offset), int(pitch), float(velocity)
+
+
+def _piano_pitch_ticks():
+    """Return C-note ticks from A0/C1 region to C8 for piano-roll plots."""
+    ticks = list(range(24, 109, 12))  # C1 to C8
+    labels = []
+    names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+    for p in ticks:
+        octave = (p // 12) - 1
+        labels.append(f"{names[p % 12]}{octave}")
+
+    return ticks, labels
+
+
+def plot_note_events_bars(
+    note_events,
+    title: str = "Predicted MIDI note events",
+    save_path: str | Path | None = None,
+    figsize=(14, 6),
+    alpha: float = 0.90,
+):
+    """Plot decoded note events as horizontal MIDI-style note bars.
+
+    x-axis: time in seconds
+    y-axis: MIDI pitch
+    bar length: note duration
+    colour: velocity
+    """
+    note_events = list(note_events)
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    if not note_events:
+        ax.set_title(title)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("MIDI pitch")
+        ax.text(
+            0.5,
+            0.5,
+            "No note events",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        fig.tight_layout()
+
+        if save_path is not None:
+            Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(str(save_path), bbox_inches="tight", dpi=160)
+
+        return fig
+
+    parsed = [_event_to_fields(ev) for ev in note_events]
+    velocities = [v for _, _, _, v in parsed]
+
+    vmax = max(velocities) if velocities else 127.0
+    if vmax <= 1.0:
+        norm = Normalize(vmin=0.0, vmax=1.0)
+    else:
+        norm = Normalize(vmin=0.0, vmax=127.0)
+
+    cmap = plt.cm.viridis
+
+    for onset, offset, pitch, velocity in parsed:
+        duration = max(0.01, offset - onset)
+        rect = Rectangle(
+            (onset, pitch - 0.40),
+            duration,
+            0.80,
+            facecolor=cmap(norm(velocity)),
+            edgecolor="black",
+            linewidth=0.15,
+            alpha=alpha,
+        )
+        ax.add_patch(rect)
+
+    max_time = max(offset for _, offset, _, _ in parsed)
+    min_pitch = min(pitch for _, _, pitch, _ in parsed)
+    max_pitch = max(pitch for _, _, pitch, _ in parsed)
+
+    ax.set_xlim(0, max_time + 0.25)
+    ax.set_ylim(max(20, min_pitch - 2), min(109, max_pitch + 2))
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("MIDI pitch")
+
+    ticks, labels = _piano_pitch_ticks()
+    valid = [(t, lab) for t, lab in zip(ticks, labels) if max(20, min_pitch - 2) <= t <= min(109, max_pitch + 2)]
+    if valid:
+        ax.set_yticks([t for t, _ in valid])
+        ax.set_yticklabels([lab for _, lab in valid])
+
+    ax.grid(True, axis="x", alpha=0.25)
+
+    sm = ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, pad=0.01)
+    cbar.set_label("Velocity")
+
+    fig.tight_layout()
+
+    if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(save_path), bbox_inches="tight", dpi=160)
+
+    return fig
+
+
+def note_events_to_roll(
+    note_events,
+    fps: float = DEMO_FPS,
+    pitch_min: int = 21,
+    pitch_max: int = 108,
+):
+    """Convert decoded note events into a piano-roll matrix.
+
+    Output shape is (88, n_frames), using velocity/intensity values.
+    """
+    note_events = list(note_events)
+    n_pitches = pitch_max - pitch_min + 1
+
+    if not note_events:
+        return np.zeros((n_pitches, 1), dtype=np.float32)
+
+    parsed = [_event_to_fields(ev) for ev in note_events]
+    max_time = max(offset for _, offset, _, _ in parsed)
+    n_frames = max(1, int(np.ceil(max_time * fps)))
+
+    roll = np.zeros((n_pitches, n_frames), dtype=np.float32)
+
+    for onset, offset, pitch, velocity in parsed:
+        if pitch < pitch_min or pitch > pitch_max:
+            continue
+
+        start_idx = max(0, int(np.floor(onset * fps)))
+        end_idx = max(start_idx + 1, int(np.ceil(offset * fps)))
+        end_idx = min(end_idx, n_frames)
+
+        value = float(velocity)
+        if value > 1.0:
+            value = value / 127.0
+
+        row = pitch - pitch_min
+        roll[row, start_idx:end_idx] = np.maximum(roll[row, start_idx:end_idx], value)
+
+    return roll
+
+
+def plot_decoded_event_roll(
+    note_events,
+    title: str = "Decoded MIDI piano roll",
+    save_path: str | Path | None = None,
+    fps: float = DEMO_FPS,
+    figsize=(14, 6),
+):
+    """Plot a piano roll reconstructed from decoded note events.
+
+    This display corresponds to the final predicted MIDI more closely than
+    plotting the raw frame-head probabilities.
+    """
+    roll = note_events_to_roll(note_events, fps=fps)
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    duration_s = roll.shape[1] / fps
+    extent = [0, duration_s, 21, 109]
+
+    im = ax.imshow(
+        roll,
+        aspect="auto",
+        origin="lower",
+        extent=extent,
+        interpolation="nearest",
+        cmap="magma",
+        vmin=0.0,
+        vmax=1.0,
+    )
+
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("MIDI pitch")
+
+    ticks, labels = _piano_pitch_ticks()
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(labels)
+
+    cbar = fig.colorbar(im, ax=ax, pad=0.01)
+    cbar.set_label("Velocity / note intensity")
+
+    fig.tight_layout()
+
+    if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(save_path), bbox_inches="tight", dpi=160)
+
+    return fig
+
+
+def plot_raw_frame_posterior(
+    frame_roll,
+    title: str = "Raw frame posterior roll (diagnostic)",
+    save_path: str | Path | None = None,
+    fps: float = DEMO_FPS,
+    frame_threshold: float | None = None,
+    figsize=(14, 6),
+):
+    """Plot the raw frame-head model output in seconds.
+
+    This is diagnostic only. It is not the same as the final decoded MIDI.
+    """
+    frame_arr = _to_numpy(frame_roll)
+
+    if frame_arr.ndim != 2:
+        raise ValueError(f"Expected 2D frame roll, got shape {frame_arr.shape}")
+
+    # The notebook prediction shape is normally (T, 88).
+    if frame_arr.shape[1] == 88:
+        img = frame_arr.T
+    elif frame_arr.shape[0] == 88:
+        img = frame_arr
+    else:
+        raise ValueError(f"Expected one dimension to be 88, got shape {frame_arr.shape}")
+
+    if frame_threshold is not None:
+        img_to_show = (img >= frame_threshold).astype(np.float32)
+        cbar_label = f"Thresholded frame activation at {frame_threshold:.2f}"
+    else:
+        img_to_show = img.astype(np.float32)
+        cbar_label = "Frame activation probability"
+
+    duration_s = img_to_show.shape[1] / fps
+    extent = [0, duration_s, 21, 109]
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    im = ax.imshow(
+        img_to_show,
+        aspect="auto",
+        origin="lower",
+        extent=extent,
+        interpolation="nearest",
+        cmap="magma",
+        vmin=0.0,
+        vmax=1.0,
+    )
+
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("MIDI pitch")
+
+    ticks, labels = _piano_pitch_ticks()
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(labels)
+
+    cbar = fig.colorbar(im, ax=ax, pad=0.01)
+    cbar.set_label(cbar_label)
+
+    fig.tight_layout()
+
+    if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(save_path), bbox_inches="tight", dpi=160)
+
+    return fig
+
 def plot_pred_vs_gt_events(
     pred_events: Iterable[DemoNoteEvent],
     gt_events: Iterable[DemoNoteEvent],
@@ -247,6 +564,8 @@ def plot_pred_vs_gt_events(
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(str(save_path), dpi=160, bbox_inches="tight")
     return fig
+
+
 
 
 def plot_midi_with_sustain_and_velocity(
