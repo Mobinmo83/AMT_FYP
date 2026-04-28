@@ -296,29 +296,50 @@ def plot_midi_with_sustain_and_velocity(
 
 
 def render_visual_midi(pm_or_path, html_path: str | Path | None = None, show_inline: bool = False):
-    """Render Visual MIDI safely and optionally save HTML."""
+    """Render Visual MIDI safely and optionally save HTML.
+
+    Visual MIDI is a presentation-only feature. If visual_midi/Bokeh is
+    incompatible in the current environment, this function returns None
+    instead of stopping the transcription notebook.
+    """
     try:
         from visual_midi import Plotter, Preset
-    except Exception:
+    except Exception as exc:
+        print(f"Visual MIDI unavailable: could not import visual_midi ({exc})")
         return None
 
-    pm = pretty_midi.PrettyMIDI(str(pm_or_path)) if isinstance(pm_or_path, (str, Path)) else pm_or_path
-    preset = Preset(plot_width=1000, plot_height=360)
-    plotter = Plotter(preset)
+    try:
+        pm = pretty_midi.PrettyMIDI(str(pm_or_path)) if isinstance(pm_or_path, (str, Path)) else pm_or_path
+        preset = Preset(plot_width=1000, plot_height=360)
+        plotter = Plotter(preset)
+    except Exception as exc:
+        print(f"Visual MIDI unavailable: setup failed ({exc})")
+        return None
+
     result = None
+
     if html_path is not None:
         html_path = Path(html_path)
         html_path.parent.mkdir(parents=True, exist_ok=True)
+
         try:
             result = plotter.show(pm, str(html_path))
-        except TypeError:
+        except Exception as exc_show:
             try:
                 result = plotter.save(pm, str(html_path))
-            except Exception:
+            except Exception as exc_save:
+                print(
+                    "Visual MIDI HTML rendering skipped. "
+                    f"show() failed with: {exc_show}; save() failed with: {exc_save}"
+                )
                 result = None
+
     if show_inline:
         try:
-            result = plotter.show_notebook(pm)
-        except Exception:
-            pass
+            notebook_result = plotter.show_notebook(pm)
+            if notebook_result is not None:
+                result = notebook_result
+        except Exception as exc:
+            print(f"Visual MIDI inline display skipped: {exc}")
+
     return result

@@ -8,7 +8,7 @@ mir_eval==0.8.2
 ipywidgets>=8.0.0
 pandas>=2.0.0
 matplotlib>=3.8.0
-bokeh>=2.4.0
-visual_midi>=1.1.0
+bokeh>=2.4,<3
+visual_midi==1.1.0
 torchinfo>=1.8.0
 pyfluidsynth
