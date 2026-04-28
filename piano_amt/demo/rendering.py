@@ -17,14 +17,6 @@ import io
 import warnings
 from IPython.display import HTML, display
 
-
-import contextlib
-import io
-import warnings
-
-
-import pretty_midi
-
 from demo.demo_config import DEFAULT_SF2_PATHS, SAMPLE_RATE
 from demo.inference import DemoNoteEvent
 from src.constants import FRAMES_PER_SECOND
@@ -770,6 +762,57 @@ def plot_event_roll_diff(
 
 
 
+# ---------------------------------------------------------------------------
+# Original MIDI / sustain visualisation
+# ---------------------------------------------------------------------------
+def plot_midi_notes_velocity(
+    midi_path: str | Path,
+    title: str = "MIDI: notes and velocity",
+    save_path: str | Path | None = None,
+    *,
+    start_time: float | None = None,
+    end_time: float | None = None,
+    window_duration: float | None = None,
+    figsize=(16, 6),
+    cmap_name: str = "viridis",
+):
+    """Plot MIDI notes as velocity-coloured bars without sustain pedal display."""
+    pm = pretty_midi.PrettyMIDI(str(midi_path))
+    events = midi_to_events(pm)
+    parsed = _parse_events(events)
+    start, end = _resolve_time_window(parsed, start_time, end_time, window_duration)
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
+    fig.patch.set_facecolor("white")
+
+    sm = _draw_note_bars(
+        ax,
+        parsed,
+        start_time=start,
+        end_time=end,
+        color_mode="velocity",
+        cmap_name=cmap_name,
+        alpha=0.88,
+        velocity_norm=_velocity_norm(parsed),
+        linewidth=0.12,
+        edgecolor="black",
+    )
+
+    if sm is not None:
+        cbar = fig.colorbar(sm, ax=ax, pad=0.015, fraction=0.025)
+        cbar.set_label("MIDI velocity")
+
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    _set_pitch_axis(ax)
+    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
+
+    if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
+
+    return fig
+
 
 
 def render_visual_midi(
@@ -778,14 +821,15 @@ def render_visual_midi(
     plot_width: int = 1100,
     plot_height: int = 380,
 ):
-    """Render Visual MIDI inline only (no saving), suitable for Colab/notebooks.
+    """Render Visual MIDI inline only for Colab/Jupyter.
 
     This version:
-    - does NOT save HTML
-    - does NOT use IFrame
-    - does NOT call plotter.show(...)
+    - does not save HTML
+    - does not save PNG
+    - does not use IFrame
+    - does not call plotter.show(...)
     - only calls plotter.show_notebook(...)
-    - avoids duplicate output
+    - avoids duplicate Visual MIDI output
     """
     try:
         with warnings.catch_warnings():
@@ -807,18 +851,22 @@ def render_visual_midi(
         return None
 
     try:
-        # Required for inline Bokeh output in notebooks / Colab
         output_notebook(hide_banner=True)
     except Exception:
         pass
 
     try:
-        pm = pretty_midi.PrettyMIDI(str(pm_or_path)) if isinstance(pm_or_path, (str, Path)) else pm_or_path
+        pm = (
+            pretty_midi.PrettyMIDI(str(pm_or_path))
+            if isinstance(pm_or_path, (str, Path))
+            else pm_or_path
+        )
 
         preset = Preset(
             plot_width=int(plot_width),
             plot_height=int(plot_height),
         )
+
         plotter = Plotter(preset)
 
     except Exception as exc:
@@ -843,9 +891,8 @@ def render_visual_midi(
             pass
 
         try:
-            # IMPORTANT:
-            # show_notebook already renders inline.
-            # Do not wrap it in display(...).
+            # show_notebook already displays the Bokeh MIDI view inline.
+            # Do not wrap this function call inside display(...).
             with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
                 return plotter.show_notebook(pm)
 
