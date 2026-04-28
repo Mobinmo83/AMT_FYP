@@ -826,11 +826,43 @@ def render_visual_midi(
     This version:
     - does not save HTML
     - does not save PNG
-    - does not use IFrame
-    - does not call plotter.show(...)
-    - only calls plotter.show_notebook(...)
-    - avoids duplicate Visual MIDI output
+    - avoids duplicate output
+    - patches NumPy/Bokeh compatibility issues in newer Colab runtimes
     """
+    try:
+        import numpy as np
+
+        # Compatibility patch for older Bokeh/Visual-MIDI with NumPy 2.x.
+        # NumPy removed np.bool8 in 2.0, while some older libraries still expect it.
+        if not hasattr(np, "bool8"):
+            np.bool8 = np.bool_
+
+    except Exception:
+        pass
+
+    try:
+        # Try to initialise Bokeh notebook output in a version-tolerant way.
+        output_notebook = None
+
+        try:
+            from bokeh.io import output_notebook as _output_notebook
+            output_notebook = _output_notebook
+        except Exception:
+            try:
+                from bokeh.plotting import output_notebook as _output_notebook
+                output_notebook = _output_notebook
+            except Exception:
+                output_notebook = None
+
+        if output_notebook is not None:
+            try:
+                output_notebook(hide_banner=True)
+            except TypeError:
+                output_notebook()
+
+    except Exception:
+        pass
+
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
@@ -843,17 +875,11 @@ def render_visual_midi(
             except Exception:
                 pass
 
-            from bokeh.io import output_notebook
             from visual_midi import Plotter, Preset
 
     except Exception as exc:
         print(f"Visual MIDI unavailable: could not import visual_midi/Bokeh ({exc})")
         return None
-
-    try:
-        output_notebook(hide_banner=True)
-    except Exception:
-        pass
 
     try:
         pm = (
@@ -891,8 +917,9 @@ def render_visual_midi(
             pass
 
         try:
-            # show_notebook already displays the Bokeh MIDI view inline.
-            # Do not wrap this function call inside display(...).
+            # IMPORTANT:
+            # show_notebook already displays inline.
+            # Do not wrap this function in display(...).
             with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
                 return plotter.show_notebook(pm)
 
