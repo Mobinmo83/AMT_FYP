@@ -17,7 +17,6 @@ import io
 import warnings
 from IPython.display import HTML, display
 
-from __future__ import annotations
 
 import contextlib
 import io
