@@ -17,6 +17,15 @@ import io
 import warnings
 from IPython.display import HTML, display
 
+from __future__ import annotations
+
+import contextlib
+import io
+import warnings
+
+
+import pretty_midi
+
 from demo.demo_config import DEFAULT_SF2_PATHS, SAMPLE_RATE
 from demo.inference import DemoNoteEvent
 from src.constants import FRAMES_PER_SECOND
@@ -762,75 +771,23 @@ def plot_event_roll_diff(
 
 
 
-# ---------------------------------------------------------------------------
-# Original MIDI / sustain visualisation
-# ---------------------------------------------------------------------------
-def plot_midi_notes_velocity(
-    midi_path: str | Path,
-    title: str = "MIDI: notes and velocity",
-    save_path: str | Path | None = None,
-    *,
-    start_time: float | None = None,
-    end_time: float | None = None,
-    window_duration: float | None = None,
-    figsize=(16, 6),
-    cmap_name: str = "viridis",
-):
-    """Plot MIDI notes as velocity-coloured bars without sustain pedal display."""
-    pm = pretty_midi.PrettyMIDI(str(midi_path))
-    events = midi_to_events(pm)
-    parsed = _parse_events(events)
-    start, end = _resolve_time_window(parsed, start_time, end_time, window_duration)
 
-    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
-    fig.patch.set_facecolor("white")
-
-    sm = _draw_note_bars(
-        ax,
-        parsed,
-        start_time=start,
-        end_time=end,
-        color_mode="velocity",
-        cmap_name=cmap_name,
-        alpha=0.88,
-        velocity_norm=_velocity_norm(parsed),
-        linewidth=0.12,
-        edgecolor="black",
-    )
-
-    if sm is not None:
-        cbar = fig.colorbar(sm, ax=ax, pad=0.015, fraction=0.025)
-        cbar.set_label("MIDI velocity")
-
-    ax.set_title(title)
-    ax.set_xlabel("Time (s)")
-    _set_pitch_axis(ax)
-    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
-
-    if save_path is not None:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
-
-    return fig
 
 def render_visual_midi(
     pm_or_path,
-    html_path: str | Path | None = None,
     show_inline: bool = True,
     plot_width: int = 1100,
     plot_height: int = 380,
 ):
-    """Render Visual MIDI once, cleanly, using saved HTML + IFrame.
+    """Render Visual MIDI inline only (no saving), suitable for Colab/notebooks.
 
-    This avoids duplicate notebook output by never calling both
-    plotter.show(...) and plotter.show_notebook(...).
-
-    Recommended demo behaviour:
-    - save HTML to html_path
-    - display the saved HTML once as an IFrame
+    This version:
+    - does NOT save HTML
+    - does NOT use IFrame
+    - does NOT call plotter.show(...)
+    - only calls plotter.show_notebook(...)
+    - avoids duplicate output
     """
-    from IPython.display import IFrame, display
-
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
@@ -843,11 +800,18 @@ def render_visual_midi(
             except Exception:
                 pass
 
+            from bokeh.io import output_notebook
             from visual_midi import Plotter, Preset
 
     except Exception as exc:
-        print(f"Visual MIDI unavailable: could not import visual_midi ({exc})")
+        print(f"Visual MIDI unavailable: could not import visual_midi/Bokeh ({exc})")
         return None
+
+    try:
+        # Required for inline Bokeh output in notebooks / Colab
+        output_notebook(hide_banner=True)
+    except Exception:
+        pass
 
     try:
         pm = pretty_midi.PrettyMIDI(str(pm_or_path)) if isinstance(pm_or_path, (str, Path)) else pm_or_path
@@ -856,19 +820,14 @@ def render_visual_midi(
             plot_width=int(plot_width),
             plot_height=int(plot_height),
         )
-
         plotter = Plotter(preset)
 
     except Exception as exc:
         print(f"Visual MIDI unavailable: setup failed ({exc})")
         return None
 
-    if html_path is None:
-        html_path = Path("visual_midi_output.html")
-    else:
-        html_path = Path(html_path)
-
-    html_path.parent.mkdir(parents=True, exist_ok=True)
+    if not show_inline:
+        return None
 
     silent_stdout = io.StringIO()
     silent_stderr = io.StringIO()
@@ -886,22 +845,11 @@ def render_visual_midi(
 
         try:
             # IMPORTANT:
-            # Use save only. Do not use plotter.show(...) here,
-            # because show can display as well as save in notebook contexts.
+            # show_notebook already renders inline.
+            # Do not wrap it in display(...).
             with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
-                plotter.save(pm, str(html_path))
+                return plotter.show_notebook(pm)
 
-        except Exception:
-            try:
-                # Fallback: some visual_midi versions behave differently.
-                # This may save the file, but we still do not call show_notebook.
-                with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
-                    plotter.show(pm, str(html_path))
-            except Exception as exc:
-                print(f"Visual MIDI HTML rendering skipped: {exc}")
-                return None
-
-    if show_inline:
-        display(IFrame(src=str(html_path), width="100%", height=int(plot_height) + 70))
-
-    return html_path
+        except Exception as exc:
+            print(f"Visual MIDI inline rendering skipped: {exc}")
+            return None
