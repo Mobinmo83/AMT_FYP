@@ -63,13 +63,25 @@ def prediction_to_note_events(
     decoder_mode: str = DEFAULT_MODE,
     **decoder_overrides,
 ) -> list[DemoNoteEvent]:
-    """Decode predictions strictly through ``decode_advanced.py``.
+    """Decode predictions through the selected public-demo decoder.
 
-    There is deliberately no fallback to the baseline decoder. If the advanced
-    decoder cannot be imported or called, the demo should fail loudly rather
-    than silently showing non-final outputs.
+    ``baseline`` uses the original baseline decoder. The final efficient/quality
+    modes use ``decode_advanced.py`` directly. There is deliberately no silent
+    fallback from advanced mode to baseline.
     """
     cfg = decoder_config or make_decoder_config(decoder_mode, **decoder_overrides)
+
+    if cfg.decoder_type == "baseline":
+        events = rolls_to_note_events(
+            onset_roll=pred["onset"],
+            frame_roll=pred["frame"],
+            velocity_roll=pred["velocity"],
+            fps=FRAMES_PER_SECOND,
+            onset_threshold=cfg.onset_threshold,
+            frame_threshold=cfg.frame_threshold,
+        )
+        return _to_demo_events(events)
+
     events = advanced_rolls_to_note_events(
         onset_roll=pred["onset"],
         frame_roll=pred["frame"],

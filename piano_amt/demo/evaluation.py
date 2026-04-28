@@ -271,6 +271,7 @@ def evaluate_prediction_vs_gt(
             "frame_threshold": cfg.frame_threshold,
             "offset_threshold": cfg.offset_threshold,
             "gt_source": "cached_label_rolls_baseline_decode_0.5_0.5",
+            "decoder_type": cfg.decoder_type,
             "advanced_kwargs": cfg.decoder_kwargs(),
         },
         "events": {
@@ -324,7 +325,7 @@ def compare_decoder_modes(
 ) -> pd.DataFrame:
     rows = []
     if configs is None:
-        modes = modes or ["efficient_m3_m4", "quality_m2_m3_m4"]
+        modes = modes or ["baseline", "efficient_m3_m4", "quality_m2_m3_m4"]
         configs = [get_decoder_preset(m) for m in modes]
     for cfg in configs:
         r = evaluate_prediction_vs_gt(pred, gt, decoder_config=cfg)

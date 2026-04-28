@@ -21,6 +21,7 @@ class AdvancedDecoderConfig:
     name: str
     label: str
     description: str
+    decoder_type: str = "advanced"  # "advanced" or "baseline"
 
     # Decode thresholds used by the final test-set experiments.
     onset_threshold: float = 0.40
@@ -64,7 +65,7 @@ class AdvancedDecoderConfig:
         evaluate_advanced.py.
         """
         d = asdict(self)
-        for key in ["name", "label", "description", "onset_threshold", "frame_threshold", "offset_threshold"]:
+        for key in ["name", "label", "description", "decoder_type", "onset_threshold", "frame_threshold", "offset_threshold"]:
             d.pop(key, None)
         return d
 
@@ -85,6 +86,19 @@ class AdvancedDecoderConfig:
 #   frame_smoothing_method='closing', min_note_duration_ms=55.0,
 #   use_duplicate_removal=True, duplicate_tolerance_sec=0.06
 ADVANCED_DECODER_PRESETS: Dict[str, AdvancedDecoderConfig] = {
+    "baseline": AdvancedDecoderConfig(
+        name="baseline_0p4_0p4",
+        label="Baseline decoder — original rolls_to_note_events",
+        description=(
+            "Original baseline decoder using onset/frame thresholds only; "
+            "included for fair side-by-side comparison with the final advanced modes."
+        ),
+        decoder_type="baseline",
+        onset_threshold=0.40,
+        frame_threshold=0.40,
+        offset_threshold=0.50,
+        min_note_duration_ms=16.0,
+    ),
     "efficient_m3_m4": AdvancedDecoderConfig(
         name="adv_m3_m4",
         label="Efficient mode — M3 + M4",
@@ -142,7 +156,7 @@ DEFAULT_OFFSET_THRESHOLD = 0.50
 def list_decoder_modes(include_single_methods: bool = True) -> list[str]:
     if include_single_methods:
         return list(ADVANCED_DECODER_PRESETS.keys())
-    return ["efficient_m3_m4", "quality_m2_m3_m4"]
+    return ["baseline", "efficient_m3_m4", "quality_m2_m3_m4"]
 
 
 def get_decoder_preset(mode: str = DEFAULT_MODE) -> AdvancedDecoderConfig:
