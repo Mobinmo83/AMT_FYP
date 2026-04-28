@@ -58,267 +58,10 @@ def _velocity_to_midi_value(v) -> int:
     return int(np.clip(round(v), 1, 127))
 
 
-def crop_note_events(
-    note_events,
-    start_sec: float,
-    end_sec: float,
-    shift_to_zero: bool = True,
-):
-    """Crop decoded note events to a display window.
-
-    The output keeps the same note-event representation used by the demo.
-    If shift_to_zero=True, the cropped excerpt starts at t=0 for clean display.
-    """
-    cropped = []
-
-    for ev in list(note_events):
-        onset, offset, pitch, velocity = _event_to_fields(ev)
-
-        if offset <= start_sec or onset >= end_sec:
-            continue
-
-        new_onset = max(onset, start_sec)
-        new_offset = min(offset, end_sec)
-
-        if shift_to_zero:
-            new_onset -= start_sec
-            new_offset -= start_sec
-
-        if new_offset > new_onset:
-            cropped.append(
-                DemoNoteEvent(
-                    int(pitch),
-                    float(new_onset),
-                    float(new_offset),
-                    _velocity_to_midi_value(velocity),
-                )
-            )
-
-    cropped.sort(key=lambda e: (e.onset_sec, e.pitch, e.offset_sec))
-    return cropped
 
 
-def crop_pretty_midi(
-    pm: pretty_midi.PrettyMIDI,
-    start_sec: float,
-    end_sec: float,
-    shift_to_zero: bool = True,
-) -> pretty_midi.PrettyMIDI:
-    """Crop a PrettyMIDI object to a short excerpt for clean display/playback."""
-    out = pretty_midi.PrettyMIDI()
-
-    for inst in pm.instruments:
-        new_inst = pretty_midi.Instrument(
-            program=inst.program,
-            is_drum=inst.is_drum,
-            name=inst.name,
-        )
-
-        for n in inst.notes:
-            if n.end <= start_sec or n.start >= end_sec:
-                continue
-
-            new_start = max(n.start, start_sec)
-            new_end = min(n.end, end_sec)
-
-            if shift_to_zero:
-                new_start -= start_sec
-                new_end -= start_sec
-
-            if new_end > new_start:
-                new_inst.notes.append(
-                    pretty_midi.Note(
-                        velocity=int(np.clip(n.velocity, 1, 127)),
-                        pitch=int(n.pitch),
-                        start=float(new_start),
-                        end=float(new_end),
-                    )
-                )
-
-        for cc in inst.control_changes:
-            if start_sec <= cc.time < end_sec:
-                new_time = cc.time - start_sec if shift_to_zero else cc.time
-                new_inst.control_changes.append(
-                    pretty_midi.ControlChange(
-                        number=int(cc.number),
-                        value=int(cc.value),
-                        time=float(new_time),
-                    )
-                )
-
-        if new_inst.notes or new_inst.control_changes:
-            out.instruments.append(new_inst)
-
-    return out
-
-
-def save_pretty_midi(pm: pretty_midi.PrettyMIDI, output_path: str | Path) -> Path:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    pm.write(str(output_path))
-    return output_path
-
-
-def save_audio_excerpt(
-    audio_path: str | Path,
-    output_path: str | Path,
-    start_sec: float,
-    end_sec: float,
-) -> Path:
-    """Save an audio excerpt matching the MIDI display window."""
-    audio_path = Path(audio_path)
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    info = sf.info(str(audio_path))
-    sr = int(info.samplerate)
-
-    start_frame = max(0, int(round(start_sec * sr)))
-    stop_frame = max(start_frame + 1, int(round(end_sec * sr)))
-    frames = stop_frame - start_frame
-
-    y, _ = sf.read(str(audio_path), start=start_frame, frames=frames, dtype="float32")
-    sf.write(str(output_path), y, sr)
-
-    return output_path
-
-
-def select_demo_window(
-    note_events,
-    duration_sec: float = 25.0,
-    preferred_start_sec: float | None = None,
-    hop_sec: float = 5.0,
-):
-    """Choose a short, non-empty window for clean demo visualisation.
-
-    If preferred_start_sec is given, it uses that exact window.
-    Otherwise, it chooses the window with the most decoded note activity.
-    """
-    note_events = list(note_events)
-
-    if preferred_start_sec is not None:
-        start = max(0.0, float(preferred_start_sec))
-        return start, start + float(duration_sec)
-
-    if not note_events:
-        return 0.0, float(duration_sec)
-
-    parsed = [_event_to_fields(ev) for ev in note_events]
-    max_time = max(offset for _, offset, _, _ in parsed)
-
-    # Corrected: do not force a long empty tail if the MIDI is shorter.
-    if max_time <= duration_sec:
-        return 0.0, float(max_time)
-
-    best_start = 0.0
-    best_score = -1.0
-
-    last_start = max(0.0, max_time - duration_sec)
-    candidates = np.arange(0.0, last_start + 1e-6, hop_sec)
-
-    for start in candidates:
-        end = start + duration_sec
-
-        score = 0.0
-        for onset, offset, _, velocity in parsed:
-            overlap = max(0.0, min(offset, end) - max(onset, start))
-            if overlap > 0:
-                score += 1.0 + 0.25 * min(overlap, 2.0) + 0.002 * _velocity_to_midi_value(velocity)
-
-        if score > best_score:
-            best_score = score
-            best_start = float(start)
-
-    return best_start, best_start + float(duration_sec)
-
-
-def plot_event_comparison_bars(
-    gt_events,
-    pred_events,
-    title: str = "Ground truth vs predicted MIDI events",
-    save_path: str | Path | None = None,
-    figsize=(14, 7),
-):
-    """Professional two-panel comparison of GT and predicted decoded MIDI events.
-
-    This is clearer than three separate MIDI visualisations.
-    """
-    gt_events = list(gt_events)
-    pred_events = list(pred_events)
-
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=figsize,
-        sharex=True,
-        sharey=True,
-        gridspec_kw={"height_ratios": [1, 1]},
-    )
-
-    panels = [
-        (axes[0], gt_events, "Evaluation ground truth MIDI excerpt", "0.35"),
-        (axes[1], pred_events, "Predicted MIDI excerpt", "tab:blue"),
-    ]
-
-    all_events = gt_events + pred_events
-
-    if all_events:
-        parsed_all = [_event_to_fields(ev) for ev in all_events]
-        max_time = max(offset for _, offset, _, _ in parsed_all)
-        min_pitch = min(pitch for _, _, pitch, _ in parsed_all)
-        max_pitch = max(pitch for _, _, pitch, _ in parsed_all)
-    else:
-        max_time = 1.0
-        min_pitch = 21
-        max_pitch = 108
-
-    for ax, events, subtitle, color in panels:
-        for ev in events:
-            onset, offset, pitch, velocity = _event_to_fields(ev)
-            duration = max(0.01, offset - onset)
-
-            rect = Rectangle(
-                (onset, pitch - 0.38),
-                duration,
-                0.76,
-                facecolor=color,
-                edgecolor="black",
-                linewidth=0.12,
-                alpha=0.85,
-            )
-            ax.add_patch(rect)
-
-        ax.set_title(subtitle)
-        ax.set_ylabel("MIDI pitch")
-        ax.grid(True, axis="x", alpha=0.25)
-
-        ticks, labels = _piano_pitch_ticks()
-        valid = [
-            (t, lab)
-            for t, lab in zip(ticks, labels)
-            if max(20, min_pitch - 2) <= t <= min(109, max_pitch + 2)
-        ]
-        if valid:
-            ax.set_yticks([t for t, _ in valid])
-            ax.set_yticklabels([lab for _, lab in valid])
-
-    axes[-1].set_xlabel("Time in excerpt (s)")
-    axes[0].set_xlim(0, max_time + 0.25)
-    axes[0].set_ylim(max(20, min_pitch - 2), min(109, max_pitch + 2))
-
-    fig.suptitle(title)
-    fig.tight_layout()
-
-    if save_path is not None:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), dpi=180, bbox_inches="tight", facecolor="white")
-
-    return fig
-
-
-# ---------------------------------------------------------------------------
 # Audio / MIDI synthesis helpers
-# ---------------------------------------------------------------------------
+
 
 def clone_pretty_midi(pm: pretty_midi.PrettyMIDI) -> pretty_midi.PrettyMIDI:
     """Clone a PrettyMIDI object through an in-memory temporary MIDI file."""
@@ -777,45 +520,10 @@ def plot_midi_event_bars(
     return fig
 
 
-def plot_prediction_midi_excerpt(
-    note_events: Iterable,
-    title: str = "Predicted MIDI excerpt",
-    save_path: str | Path | None = None,
-    *,
-    start_time: float | None = None,
-    end_time: float | None = None,
-    window_duration: float | None = 40.0,
-    pitch_min: int = PIANO_LOW,
-    pitch_max: int = PIANO_HIGH,
-    figsize=(16, 7),
-    cmap_name: str = "viridis",
-):
-    """Dissertation-friendly single-view MIDI excerpt plot.
-
-    White background, precise time grid, labelled pitch axis, and velocity colour.
-    """
-    return plot_midi_event_bars(
-        note_events,
-        title=title,
-        save_path=save_path,
-        start_time=start_time,
-        end_time=end_time,
-        window_duration=window_duration,
-        pitch_min=pitch_min,
-        pitch_max=pitch_max,
-        figsize=figsize,
-        cmap_name=cmap_name,
-        facecolor="white",
-        major_tick_sec=5.0,
-        minor_tick_sec=1.0,
-        bar_height=0.78,
-        edgecolor="black",
-    )
 
 
-# Backwards-compatible name used in your notebook.
-def plot_note_events_bars(*args, **kwargs):
-    return plot_midi_event_bars(*args, **kwargs)
+
+
 
 
 def note_events_to_roll(
@@ -873,154 +581,8 @@ def note_events_to_roll(
     return roll
 
 
-def plot_decoded_event_roll(
-    note_events: Iterable,
-    title: str = "Decoded MIDI piano roll",
-    save_path: str | Path | None = None,
-    *,
-    fps: float = DEMO_FPS,
-    start_time: float | None = None,
-    end_time: float | None = None,
-    window_duration: float | None = None,
-    pitch_min: int = PIANO_LOW,
-    pitch_max: int = PIANO_HIGH,
-    figsize=(14, 6),
-    cmap: str = "magma",
-):
-    """Plot a piano roll reconstructed from decoded MIDI events.
-
-    This is the correct main piano-roll view for predicted MIDI, because it reflects
-    the actual note events that are written to the MIDI file.
-    """
-    parsed = _parse_events(note_events)
-    start, end = _resolve_time_window(parsed, start_time, end_time, window_duration)
-
-    roll = note_events_to_roll(
-        parsed,
-        fps=fps,
-        pitch_min=pitch_min,
-        pitch_max=pitch_max,
-        start_time=start,
-        end_time=end,
-        use_velocity=True,
-    )
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-    fig.patch.set_facecolor("white")
-    extent = [start, end, pitch_min - 0.5, pitch_max + 0.5]
-
-    im = ax.imshow(
-        roll,
-        aspect="auto",
-        origin="lower",
-        extent=extent,
-        interpolation="nearest",
-        cmap=cmap,
-        vmin=0.0,
-        vmax=1.0,
-    )
-
-    ax.set_title(title)
-    ax.set_xlabel("Time (s)")
-    _set_pitch_axis(ax, pitch_min, pitch_max)
-    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
-
-    cbar = fig.colorbar(im, ax=ax, pad=0.01)
-    cbar.set_label("Velocity / note intensity")
-
-    fig.tight_layout()
-
-    if save_path is not None:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), bbox_inches="tight", dpi=180, facecolor="white")
-
-    return fig
 
 
-def plot_event_roll_comparison(
-    reference_events: Iterable,
-    predicted_events: Iterable,
-    title: str = "Reference vs predicted MIDI piano rolls",
-    reference_label: str = "Reference",
-    predicted_label: str = "Prediction",
-    save_path: str | Path | None = None,
-    *,
-    fps: float = DEMO_FPS,
-    start_time: float | None = None,
-    end_time: float | None = None,
-    window_duration: float | None = None,
-    pitch_min: int = PIANO_LOW,
-    pitch_max: int = PIANO_HIGH,
-    figsize=(14, 7),
-):
-    """Two-panel piano-roll comparison built from decoded note events."""
-    ref_parsed = _parse_events(reference_events)
-    pred_parsed = _parse_events(predicted_events)
-    both = list(ref_parsed) + list(pred_parsed)
-    start, end = _resolve_time_window(both, start_time, end_time, window_duration)
-
-    ref_roll = note_events_to_roll(
-        ref_parsed,
-        fps=fps,
-        pitch_min=pitch_min,
-        pitch_max=pitch_max,
-        start_time=start,
-        end_time=end,
-        use_velocity=True,
-    )
-    pred_roll = note_events_to_roll(
-        pred_parsed,
-        fps=fps,
-        pitch_min=pitch_min,
-        pitch_max=pitch_max,
-        start_time=start,
-        end_time=end,
-        use_velocity=True,
-    )
-
-    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True, sharey=True)
-    fig.patch.set_facecolor("white")
-    extent = [start, end, pitch_min - 0.5, pitch_max + 0.5]
-
-    im0 = axes[0].imshow(
-        ref_roll,
-        aspect="auto",
-        origin="lower",
-        extent=extent,
-        interpolation="nearest",
-        cmap="Greys",
-        vmin=0.0,
-        vmax=1.0,
-    )
-    axes[0].set_title(reference_label)
-    _set_pitch_axis(axes[0], pitch_min, pitch_max)
-    _style_midi_axis(axes[0], start_time=start, end_time=end, facecolor="white")
-
-    im1 = axes[1].imshow(
-        pred_roll,
-        aspect="auto",
-        origin="lower",
-        extent=extent,
-        interpolation="nearest",
-        cmap="magma",
-        vmin=0.0,
-        vmax=1.0,
-    )
-    axes[1].set_title(predicted_label)
-    axes[1].set_xlabel("Time (s)")
-    _set_pitch_axis(axes[1], pitch_min, pitch_max)
-    _style_midi_axis(axes[1], start_time=start, end_time=end, facecolor="white")
-
-    fig.colorbar(im0, ax=axes[0], pad=0.01, label="Reference intensity")
-    fig.colorbar(im1, ax=axes[1], pad=0.01, label="Predicted velocity / intensity")
-    fig.suptitle(title)
-    fig.tight_layout()
-
-    if save_path is not None:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), bbox_inches="tight", dpi=180, facecolor="white")
-
-    return fig
 
 
 def plot_event_bar_comparison(
@@ -1045,7 +607,14 @@ def plot_event_bar_comparison(
     both = list(ref_parsed) + list(pred_parsed)
     start, end = _resolve_time_window(both, start_time, end_time, window_duration)
 
-    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True, sharey=True)
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=figsize,
+        sharex=True,
+        sharey=True,
+        constrained_layout=True,
+    )
     fig.patch.set_facecolor("white")
 
     shared_norm = _velocity_norm(both)
@@ -1062,6 +631,7 @@ def plot_event_bar_comparison(
         edgecolor="black",
         velocity_norm=shared_norm,
     )
+
     axes[0].set_title(reference_label)
     _set_pitch_axis(axes[0], pitch_min, pitch_max)
     _style_midi_axis(axes[0], start_time=start, end_time=end, facecolor="white")
@@ -1078,6 +648,7 @@ def plot_event_bar_comparison(
         edgecolor="black",
         velocity_norm=shared_norm,
     )
+
     axes[1].set_title(predicted_label)
     axes[1].set_xlabel("Time (s)")
     _set_pitch_axis(axes[1], pitch_min, pitch_max)
@@ -1085,16 +656,19 @@ def plot_event_bar_comparison(
 
     sm = sm1 if sm1 is not None else sm0
     if sm is not None:
-        fig.colorbar(sm, ax=axes, pad=0.01, label="MIDI velocity")
+        cbar = fig.colorbar(sm, ax=axes.ravel().tolist(), pad=0.015, fraction=0.025)
+        cbar.set_label("MIDI velocity")
 
     fig.suptitle(title)
-    fig.tight_layout()
 
     if save_path is not None:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(str(save_path), bbox_inches="tight", dpi=200, facecolor="white")
 
     return fig
+
+
+
 
 def plot_event_roll_diff(
     reference_events: Iterable,
@@ -1186,302 +760,33 @@ def plot_event_roll_diff(
     return fig
 
 
-# Backwards-compatible name used in your existing notebook.
-def plot_pred_vs_gt_events(
-    pred_events: Iterable[DemoNoteEvent],
-    gt_events: Iterable[DemoNoteEvent],
-    title: str = "Predicted vs evaluation ground-truth note events",
-    max_time: float | None = None,
-    save_path: str | Path | None = None,
-):
-    return plot_event_bar_comparison(
-        reference_events=gt_events,
-        predicted_events=pred_events,
-        title=title,
-        reference_label="Evaluation GT MIDI from cached rolls",
-        predicted_label="Predicted MIDI",
-        save_path=save_path,
-        start_time=0.0,
-        end_time=max_time,
-        window_duration=None if max_time is not None else 60.0,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Raw model-posterior diagnostic plots
-# ---------------------------------------------------------------------------
-
-def plot_raw_frame_posterior(
-    frame_roll,
-    title: str = "Raw frame posterior roll before MIDI decoding",
-    save_path: str | Path | None = None,
-    *,
-    fps: float = DEMO_FPS,
-    frame_threshold: float | None = None,
-    start_time: float = 0.0,
-    end_time: float | None = None,
-    window_duration: float | None = None,
-    figsize=(14, 5),
-):
-    """Plot the raw frame-head model output.
-
-    Diagnostic only: this is not the same as the final decoded MIDI.
-    """
-    frame_arr = _to_numpy(frame_roll)
-
-    if frame_arr.ndim != 2:
-        raise ValueError(f"Expected 2D frame roll, got shape {frame_arr.shape}")
-
-    if frame_arr.shape[1] == 88:
-        img = frame_arr.T
-    elif frame_arr.shape[0] == 88:
-        img = frame_arr
-    else:
-        raise ValueError(f"Expected one dimension to be 88, got shape {frame_arr.shape}")
-
-    total_duration = img.shape[1] / fps
-    start = max(0.0, float(start_time))
-
-    if window_duration is not None:
-        end = min(total_duration, start + float(window_duration))
-    elif end_time is not None:
-        end = min(total_duration, float(end_time))
-    else:
-        end = total_duration
-
-    if end <= start:
-        end = min(total_duration, start + 1.0)
-
-    start_idx = max(0, int(np.floor(start * fps)))
-    end_idx = min(img.shape[1], max(start_idx + 1, int(np.ceil(end * fps))))
-    img = img[:, start_idx:end_idx]
-
-    if frame_threshold is not None:
-        img_to_show = (img >= frame_threshold).astype(np.float32)
-        cbar_label = f"Thresholded frame activation at {frame_threshold:.2f}"
-    else:
-        img_to_show = img.astype(np.float32)
-        cbar_label = "Frame activation probability"
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-    fig.patch.set_facecolor("white")
-    extent = [start, end, PIANO_LOW - 0.5, PIANO_HIGH + 0.5]
-
-    im = ax.imshow(
-        img_to_show,
-        aspect="auto",
-        origin="lower",
-        extent=extent,
-        interpolation="nearest",
-        cmap="magma",
-        vmin=0.0,
-        vmax=1.0,
-    )
-
-    ax.set_title(title)
-    ax.set_xlabel("Time (s)")
-    _set_pitch_axis(ax)
-    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
-
-    cbar = fig.colorbar(im, ax=ax, pad=0.01)
-    cbar.set_label(cbar_label)
-
-    fig.tight_layout()
-
-    if save_path is not None:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), bbox_inches="tight", dpi=180, facecolor="white")
-
-    return fig
-
-
-def plot_piano_roll_side_by_side(
-    pred_frame,
-    gt_frame=None,
-    n_frames: int | None = None,
-    title: str = "Raw frame-roll comparison",
-    save_path: str | Path | None = None,
-    frame_threshold: float = 0.4,
-):
-    """Legacy diagnostic raw frame-roll plot.
-
-    Kept for compatibility with old notebook cells. For final predicted MIDI display,
-    prefer plot_decoded_event_roll() and plot_midi_event_bars().
-    """
-    pred = _to_numpy(pred_frame)
-    gt = _to_numpy(gt_frame) if gt_frame is not None else None
-
-    if n_frames is None:
-        n_frames = pred.shape[0]
-        if gt is not None:
-            n_frames = min(n_frames, gt.shape[0])
-
-    n_frames = int(n_frames)
-
-    pred_img = (pred[:n_frames].T > frame_threshold).astype(np.float32)
-    duration_s = n_frames / DEMO_FPS
-    extent = [0, duration_s, PIANO_LOW - 0.5, PIANO_HIGH + 0.5]
-
-    if gt is None:
-        fig, ax = plt.subplots(1, 1, figsize=(14, 5))
-        fig.patch.set_facecolor("white")
-        ax.imshow(
-            pred_img,
-            aspect="auto",
-            origin="lower",
-            cmap="gray_r",
-            vmin=0,
-            vmax=1,
-            interpolation="nearest",
-            extent=extent,
-        )
-        ax.set_title(title)
-        ax.set_xlabel("Time (s)")
-        _set_pitch_axis(ax)
-        _style_midi_axis(ax, start_time=0.0, end_time=duration_s, facecolor="white")
-    else:
-        gt_img = (gt[:n_frames].T > 0.5).astype(np.float32)
-
-        fig, axes = plt.subplots(2, 1, figsize=(14, 7), sharex=True, sharey=True)
-        fig.patch.set_facecolor("white")
-
-        axes[0].imshow(
-            gt_img,
-            aspect="auto",
-            origin="lower",
-            cmap="gray_r",
-            vmin=0,
-            vmax=1,
-            interpolation="nearest",
-            extent=extent,
-        )
-        axes[0].set_title("Cached GT frame label roll")
-        _style_midi_axis(axes[0], start_time=0.0, end_time=duration_s, facecolor="white")
-
-        axes[1].imshow(
-            pred_img,
-            aspect="auto",
-            origin="lower",
-            cmap="gray_r",
-            vmin=0,
-            vmax=1,
-            interpolation="nearest",
-            extent=extent,
-        )
-        axes[1].set_title("Raw predicted frame roll")
-        _style_midi_axis(axes[1], start_time=0.0, end_time=duration_s, facecolor="white")
-
-        for ax in axes:
-            _set_pitch_axis(ax)
-
-        axes[1].set_xlabel("Time (s)")
-        fig.suptitle(title)
-
-    fig.tight_layout()
-
-    if save_path is not None:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), dpi=180, bbox_inches="tight", facecolor="white")
-
-    return fig
-
-
-def plot_roll_diff(
-    pred_frame,
-    gt_frame,
-    frame_threshold: float = 0.4,
-    max_frames: int | None = None,
-    title: str = "Raw frame-roll difference: green=overlap, red=extra, blue=missed",
-    save_path: str | Path | None = None,
-):
-    """Legacy raw frame-roll difference plot.
-
-    This compares thresholded frame activations, not decoded note events.
-    """
-    pred = _to_numpy(pred_frame)
-    gt = _to_numpy(gt_frame)
-
-    n = min(pred.shape[0], gt.shape[0])
-    if max_frames is not None:
-        n = min(n, int(max_frames))
-
-    pred = pred[:n]
-    gt = gt[:n]
-
-    pred_bin = pred > frame_threshold
-    gt_bin = gt > 0.5
-
-    rgb = np.ones((pred_bin.shape[1], pred_bin.shape[0], 3), dtype=np.float32)
-
-    matched = (pred_bin & gt_bin).T
-    extra = (pred_bin & (~gt_bin)).T
-    missed = ((~pred_bin) & gt_bin).T
-
-    rgb[matched] = np.array([0.20, 0.70, 0.25], dtype=np.float32)
-    rgb[extra] = np.array([0.90, 0.20, 0.20], dtype=np.float32)
-    rgb[missed] = np.array([0.20, 0.35, 0.90], dtype=np.float32)
-
-    duration_s = n / DEMO_FPS
-    extent = [0, duration_s, PIANO_LOW - 0.5, PIANO_HIGH + 0.5]
-
-    fig, ax = plt.subplots(1, 1, figsize=(14, 5))
-    fig.patch.set_facecolor("white")
-    ax.imshow(rgb, aspect="auto", origin="lower", interpolation="nearest", extent=extent)
-
-    ax.set_title(title)
-    ax.set_xlabel("Time (s)")
-    _set_pitch_axis(ax)
-    _style_midi_axis(ax, start_time=0.0, end_time=duration_s, facecolor="white")
-
-    ax.legend(
-        handles=[
-            Patch(facecolor=(0.20, 0.70, 0.25), label="Overlap"),
-            Patch(facecolor=(0.90, 0.20, 0.20), label="Extra prediction"),
-            Patch(facecolor=(0.20, 0.35, 0.90), label="Missed GT"),
-        ],
-        loc="upper right",
-    )
-
-    fig.tight_layout()
-
-    if save_path is not None:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), dpi=180, bbox_inches="tight", facecolor="white")
-
-    return fig
 
 
 # ---------------------------------------------------------------------------
 # Original MIDI / sustain visualisation
 # ---------------------------------------------------------------------------
-def plot_midi_with_sustain_and_velocity(
+def plot_midi_notes_velocity(
     midi_path: str | Path,
-    title: str = "MIDI: notes, velocity and sustain",
+    title: str = "MIDI: notes and velocity",
     save_path: str | Path | None = None,
     *,
     start_time: float | None = None,
     end_time: float | None = None,
     window_duration: float | None = None,
-    figsize=(16, 7),
+    figsize=(16, 6),
     cmap_name: str = "viridis",
 ):
-    """Plot MIDI notes as velocity-coloured bars plus sustain CC64 below."""
+    """Plot MIDI notes as velocity-coloured bars without sustain pedal display."""
     pm = pretty_midi.PrettyMIDI(str(midi_path))
     events = midi_to_events(pm)
     parsed = _parse_events(events)
     start, end = _resolve_time_window(parsed, start_time, end_time, window_duration)
 
-    fig, (ax_notes, ax_pedal) = plt.subplots(
-        2,
-        1,
-        figsize=figsize,
-        sharex=True,
-        gridspec_kw={"height_ratios": [4, 1]},
-    )
+    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
     fig.patch.set_facecolor("white")
 
     sm = _draw_note_bars(
-        ax_notes,
+        ax,
         parsed,
         start_time=start,
         end_time=end,
@@ -1489,45 +794,18 @@ def plot_midi_with_sustain_and_velocity(
         cmap_name=cmap_name,
         alpha=0.88,
         velocity_norm=_velocity_norm(parsed),
-        linewidth=0.15,
+        linewidth=0.12,
         edgecolor="black",
     )
 
     if sm is not None:
-        fig.colorbar(sm, ax=ax_notes, pad=0.01, label="MIDI velocity")
+        cbar = fig.colorbar(sm, ax=ax, pad=0.015, fraction=0.025)
+        cbar.set_label("MIDI velocity")
 
-    ax_notes.set_title(title)
-    _set_pitch_axis(ax_notes)
-    _style_midi_axis(ax_notes, start_time=start, end_time=end, facecolor="white")
-
-    cc_points: list[tuple[float, int]] = []
-    for inst in pm.instruments:
-        for cc in inst.control_changes:
-            if cc.number == 64 and start <= float(cc.time) <= end:
-                cc_points.append((float(cc.time), int(cc.value)))
-
-    if cc_points:
-        cc_points.sort()
-        times = [t for t, _ in cc_points]
-        values = [v for _, v in cc_points]
-        ax_pedal.step(times, values, where="post")
-        ax_pedal.axhline(64, linestyle="--", linewidth=1)
-        ax_pedal.set_ylim(0, 127)
-    else:
-        ax_pedal.text(
-            0.01,
-            0.5,
-            "No sustain CC64 events in this window",
-            transform=ax_pedal.transAxes,
-            va="center",
-        )
-        ax_pedal.set_ylim(0, 1)
-
-    ax_pedal.set_ylabel("Sustain CC64")
-    ax_pedal.set_xlabel("Time (s)")
-    _style_midi_axis(ax_pedal, start_time=start, end_time=end, facecolor="white")
-
-    fig.tight_layout()
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    _set_pitch_axis(ax)
+    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
 
     if save_path is not None:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
