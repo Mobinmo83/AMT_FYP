@@ -315,9 +315,9 @@ def style_main_scores_table(df: pd.DataFrame):
         df.style
         .hide(axis="index")
         .format({
-            "Precision": "{:.2f}",
-            "Recall": "{:.2f}",
-            "F1-score": "{:.2f}",
+            "Precision": "{:.4f}",
+            "Recall": "{:.4f}",
+            "F1-score": "{:.4f}",
         })
         .set_properties(**{
             "text-align": "center",
