@@ -398,3 +398,157 @@ def compare_decoder_modes(
             "GT source": r["decoder"].get("gt_source", ""),
         })
     return pd.DataFrame(rows)
+
+
+def style_supplementary_table(df: pd.DataFrame):
+    """Same visual style as style_main_scores_table, but for supplementary values."""
+    return (
+        df.style
+        .hide(axis="index")
+        .format({
+            "Value": "{:.2f}",
+        })
+        .set_properties(**{
+            "text-align": "center",
+            "font-size": "13px",
+            "padding": "6px",
+        })
+        .set_table_styles([
+            {
+                "selector": "th",
+                "props": [
+                    ("text-align", "center"),
+                    ("font-weight", "bold"),
+                    ("font-size", "13px"),
+                    ("padding", "6px"),
+                ],
+            },
+            {
+                "selector": "td",
+                "props": [
+                    ("border", "1px solid #ddd"),
+                ],
+            },
+            {
+                "selector": "table",
+                "props": [
+                    ("border-collapse", "collapse"),
+                    ("margin", "8px 0"),
+                ],
+            },
+        ])
+    )
+
+
+def all_decoder_metric_tables(
+    pred: PredictionDict,
+    gt: GroundTruthDict,
+    configs: list[tuple[str, AdvancedDecoderConfig]],
+):
+    """Build main metric and supplementary tables for multiple decoder methods."""
+    metric_rows = []
+    supplementary_rows = []
+
+    for method_label, method_cfg in configs:
+        method_results = evaluate_prediction_vs_gt(
+            pred,
+            gt,
+            decoder_config=method_cfg,
+        )
+
+        metric_df = main_scores_table(method_results)
+        metric_df.insert(0, "Decoder method", method_label)
+        metric_rows.append(metric_df)
+
+        supplementary_df = supplementary_table(method_results)
+        supplementary_df.insert(0, "Decoder method", method_label)
+        supplementary_rows.append(supplementary_df)
+
+    all_metrics_df = pd.concat(metric_rows, ignore_index=True)
+    all_supplementary_df = pd.concat(supplementary_rows, ignore_index=True)
+
+    return all_metrics_df, all_supplementary_df
+
+
+def style_all_decoder_metrics_table(df: pd.DataFrame):
+    """Style for the all-method main metric table."""
+    return (
+        df.style
+        .hide(axis="index")
+        .format({
+            "Precision": "{:.4f}",
+            "Recall": "{:.4f}",
+            "F1-score": "{:.4f}",
+        })
+        .set_properties(**{
+            "text-align": "center",
+            "font-size": "13px",
+            "padding": "6px",
+        })
+        .set_table_styles([
+            {
+                "selector": "th",
+                "props": [
+                    ("text-align", "center"),
+                    ("font-weight", "bold"),
+                    ("font-size", "13px"),
+                    ("padding", "6px"),
+                ],
+            },
+            {
+                "selector": "td",
+                "props": [
+                    ("border", "1px solid #ddd"),
+                ],
+            },
+            {
+                "selector": "table",
+                "props": [
+                    ("border-collapse", "collapse"),
+                    ("margin", "8px 0"),
+                ],
+            },
+        ])
+    )
+
+
+def style_all_decoder_supplementary_table(df: pd.DataFrame):
+    """Style for the all-method supplementary table."""
+    return (
+        df.style
+        .hide(axis="index")
+        .format({
+            "Value": "{:.2f}",
+        })
+        .set_properties(**{
+            "text-align": "center",
+            "font-size": "13px",
+            "padding": "6px",
+        })
+        .set_table_styles([
+            {
+                "selector": "th",
+                "props": [
+                    ("text-align", "center"),
+                    ("font-weight", "bold"),
+                    ("font-size", "13px"),
+                    ("padding", "6px"),
+                ],
+            },
+            {
+                "selector": "td",
+                "props": [
+                    ("border", "1px solid #ddd"),
+                ],
+            },
+            {
+                "selector": "table",
+                "props": [
+                    ("border-collapse", "collapse"),
+                    ("margin", "8px 0"),
+                ],
+            },
+        ])
+    )
+
+
