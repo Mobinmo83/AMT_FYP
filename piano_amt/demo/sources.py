@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import io
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import librosa
 import numpy as np
 import soundfile as sf
 import torch
 
-from demo.demo_config import MANIFEST_PATH, SAMPLE_RATE, TEMP_DIR, UPLOADED_DIR, ensure_demo_dirs
+from demo.demo_config import MANIFEST_PATH, SAMPLE_RATE, UPLOADED_DIR, ensure_demo_dirs
 from src.audio import load_audio_as_log_mel
 
 
@@ -19,7 +18,9 @@ def load_sample_manifest(manifest_path: str | Path | None = None) -> Dict:
     if not path.exists():
         return {"samples": []}
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        manifest = json.load(f)
+    manifest.setdefault("samples", [])
+    return manifest
 
 
 def list_demo_sample_names(manifest_path: str | Path | None = None) -> List[str]:
@@ -27,24 +28,32 @@ def list_demo_sample_names(manifest_path: str | Path | None = None) -> List[str]
     return [item["name"] for item in manifest.get("samples", [])]
 
 
-def resolve_demo_sample_paths(sample_name: str, repo_root: str | Path | None = None) -> Tuple[Path, Path]:
-    manifest = load_sample_manifest()
-    base = Path(repo_root) if repo_root is not None else Path(".")
+def get_demo_sample_manifest_item(sample_name: str, manifest_path: str | Path | None = None) -> Dict:
+    manifest = load_sample_manifest(manifest_path)
     for item in manifest.get("samples", []):
-        if item["name"] == sample_name:
-            audio_path = (base / item["audio"]).resolve()
-            labels_path = (base / item["labels"]).resolve()
-            return audio_path, labels_path
+        if item.get("name") == sample_name:
+            return item
     raise KeyError(f"Sample not found in manifest: {sample_name}")
 
 
+def resolve_demo_sample_paths(sample_name: str, repo_root: str | Path | None = None) -> Tuple[Path, Path, Path | None, Dict]:
+    """Return audio, label-roll, optional original-MIDI path, and metadata."""
+    item = get_demo_sample_manifest_item(sample_name)
+    base = Path(repo_root) if repo_root is not None else Path(".")
+    audio_path = (base / item["audio"]).resolve()
+    labels_path = (base / item["labels"]).resolve()
+    midi_rel = item.get("midi") or item.get("original_midi")
+    midi_path = (base / midi_rel).resolve() if midi_rel else None
+    metadata = dict(item.get("metadata", {}))
+    metadata.update({k: v for k, v in item.items() if k not in {"audio", "labels", "midi", "original_midi", "metadata"}})
+    return audio_path, labels_path, midi_path, metadata
+
+
 def save_uploaded_audio(upload_bytes: bytes, filename: str) -> Path:
-    """Save raw upload bytes and normalise to 16 kHz mono WAV."""
     ensure_demo_dirs()
     raw_path = UPLOADED_DIR / Path(filename).name
     with open(raw_path, "wb") as f:
         f.write(upload_bytes)
-
     normalised_path = UPLOADED_DIR / f"{raw_path.stem}_16k_mono.wav"
     y, _ = librosa.load(str(raw_path), sr=SAMPLE_RATE, mono=True)
     sf.write(str(normalised_path), y, SAMPLE_RATE)
@@ -52,10 +61,9 @@ def save_uploaded_audio(upload_bytes: bytes, filename: str) -> Path:
 
 
 def audio_path_to_mel(audio_path: str | Path) -> torch.Tensor:
-    """Load audio and return mel with shape (229, T)."""
     mel = load_audio_as_log_mel(str(audio_path))
     if isinstance(mel, dict):
-        mel = mel["mel"]
+        mel = mel.get("mel", next(iter(mel.values())))
     elif isinstance(mel, tuple):
         mel = mel[0]
     mel = torch.tensor(np.asarray(mel), dtype=torch.float32)
@@ -63,14 +71,15 @@ def audio_path_to_mel(audio_path: str | Path) -> torch.Tensor:
         raise ValueError(f"Expected 2D mel array, got {tuple(mel.shape)}")
     if mel.shape[0] != 229 and mel.shape[1] == 229:
         mel = mel.transpose(0, 1)
-    return mel
+    if mel.shape[0] != 229:
+        raise ValueError(f"Expected mel shape (229, T), got {tuple(mel.shape)}")
+    return mel.contiguous()
 
 
 def load_ground_truth_labels(labels_path: str | Path) -> Dict[str, torch.Tensor]:
     data = np.load(str(labels_path))
-    return {
-        "onset": torch.tensor(data["onset"], dtype=torch.float32),
-        "frame": torch.tensor(data["frame"], dtype=torch.float32),
-        "offset": torch.tensor(data["offset"], dtype=torch.float32),
-        "velocity": torch.tensor(data["velocity"], dtype=torch.float32),
-    }
+    required = ["onset", "frame", "offset", "velocity"]
+    missing = [k for k in required if k not in data]
+    if missing:
+        raise KeyError(f"Ground-truth label file is missing keys: {missing}")
+    return {k: torch.tensor(data[k], dtype=torch.float32) for k in required}

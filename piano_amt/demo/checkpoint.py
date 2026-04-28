@@ -18,10 +18,6 @@ from models.onsets_frames.model import OnsetsAndFrames
 
 
 def resolve_checkpoint_path(force_download: bool = False) -> Path:
-    """Download the public checkpoint from Hugging Face into the local cache.
-
-    Returns a local file path that can be passed directly to ``torch.load``.
-    """
     ensure_demo_dirs()
     local_path = hf_hub_download(
         repo_id=HF_REPO_ID,
@@ -35,7 +31,6 @@ def resolve_checkpoint_path(force_download: bool = False) -> Path:
 
 
 def load_demo_model(device: str | torch.device | None = None) -> Tuple[OnsetsAndFrames, Dict[str, Any], Path]:
-    """Load your public checkpoint into the existing OnsetsAndFrames model."""
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     ckpt_path = resolve_checkpoint_path()
     ckpt = torch.load(str(ckpt_path), map_location=device)
@@ -71,7 +66,6 @@ def format_checkpoint_summary(model: OnsetsAndFrames, ckpt: Dict[str, Any], ckpt
 
 
 def maybe_torchinfo_summary(model: OnsetsAndFrames, n_mels: int = 229, time_steps: int = 512) -> str:
-    """Return a compact torchinfo summary string when torchinfo is installed."""
     try:
         from torchinfo import summary
     except Exception:

@@ -1,119 +1,172 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Mapping
+from dataclasses import asdict, dataclass, replace
+from typing import Any, Dict, Mapping
 
 
 @dataclass(frozen=True)
-class DecoderPreset:
-    """Named demo preset mirroring the Chapter 5 advanced-decoder ablations.
+class AdvancedDecoderConfig:
+    """Editable decoder configuration used by the public demo.
 
-    M2 = frame smoothing
+    Field names match ``models.onsets_frames.decode_advanced.advanced_rolls_to_note_events``.
+    This prevents alias filtering and keeps the demo aligned with the final
+    evaluation notebook.
+
+    M2 = frame-level smoothing
     M3 = minimum note duration
     M4 = velocity-aware duplicate removal
-
-    The keyword dictionary intentionally contains several common aliases.  The
-    adapter in ``demo.inference`` filters these against the actual
-    ``decode_advanced.py`` function signature at runtime, so the public demo can
-    stay compatible if your internal argument names are slightly different.
     """
 
     name: str
     label: str
     description: str
-    advanced_kwargs: Mapping[str, object]
+    decoder_type: str = "advanced"  # "advanced" or "baseline"
+
+    # Final/test decode thresholds for prediction rolls.
+    onset_threshold: float = 0.40
+    frame_threshold: float = 0.40
+    offset_threshold: float = 0.50
+
+    # M1: onset-conditioned offset estimation.
+    use_onset_conditioned_offset: bool = False
+
+    # M2: frame-level smoothing.
+    use_frame_smoothing: bool = False
+    frame_smoothing_kernel: int = 7
+    frame_smoothing_method: str = "median"  # "median", "gaussian", or "closing"
+
+    # M3: minimum note duration.
+    min_note_duration_ms: float = 16.0
+
+    # M4: velocity-aware duplicate removal.
+    use_duplicate_removal: bool = False
+    duplicate_tolerance_sec: float = 0.05
+
+    # M5: chord-aware onset grouping.
+    use_chord_grouping: bool = False
+    chord_tolerance_sec: float = 0.03
+    chord_snap_to: str = "median"
+
+    # M6: adaptive thresholds.
+    use_adaptive_thresholds: bool = False
+    adaptive_onset_k: float = 0.5
+    adaptive_frame_k: float = 0.5
+
+    # M7: sustain-pedal-aware extension.
+    use_pedal_extension: bool = False
+    pedal_energy_threshold: float = 10.0
+    pedal_max_extension_sec: float = 2.0
+
+    def decoder_kwargs(self) -> Dict[str, Any]:
+        """Return only kwargs consumed by the advanced decoder.
+
+        Thresholds and metadata fields are removed because thresholds are passed
+        explicitly, matching the final evaluation notebook call pattern.
+        """
+        d = asdict(self)
+        for key in [
+            "name", "label", "description", "decoder_type",
+            "onset_threshold", "frame_threshold", "offset_threshold",
+        ]:
+            d.pop(key, None)
+        return d
+
+    def with_overrides(self, **overrides: Any) -> "AdvancedDecoderConfig":
+        valid = set(asdict(self).keys())
+        unknown = sorted(set(overrides) - valid)
+        if unknown:
+            raise KeyError(f"Unknown decoder config field(s): {unknown}")
+        return replace(self, **overrides)
 
 
-DEFAULT_ONSET_THRESHOLD = 0.40
-DEFAULT_FRAME_THRESHOLD = 0.40
-
-# Tuned values used for the public demo.  Keep these aligned with the values you
-# report for the combined validation/test configurations in Chapter 5.
-ADVANCED_DECODER_PRESETS: Dict[str, DecoderPreset] = {
-    "quality_m2_m3_m4": DecoderPreset(
-        name="quality_m2_m3_m4",
+ADVANCED_DECODER_PRESETS: Dict[str, AdvancedDecoderConfig] = {
+    "baseline": AdvancedDecoderConfig(
+        name="baseline_0p4_0p4",
+        label="Baseline decoder — original rolls_to_note_events",
+        description="Original baseline decoder using onset/frame thresholds only.",
+        decoder_type="baseline",
+        onset_threshold=0.40,
+        frame_threshold=0.40,
+        offset_threshold=0.50,
+        min_note_duration_ms=16.0,
+    ),
+    "efficient_m3_m4": AdvancedDecoderConfig(
+        name="adv_m3_m4",
+        label="Efficient mode — M3 + M4",
+        description="Minimum note duration + velocity-aware duplicate removal.",
+        min_note_duration_ms=55.0,
+        use_duplicate_removal=True,
+        duplicate_tolerance_sec=0.06,
+    ),
+    "quality_m2_m3_m4": AdvancedDecoderConfig(
+        name="adv_m2_m3_m4",
         label="Quality mode — M2 + M3 + M4",
         description=(
-            "Full selected demo decoder: frame smoothing, minimum duration, "
-            "and velocity-aware duplicate removal."
+            "Frame-level closing smoothing + minimum note duration + "
+            "velocity-aware duplicate removal."
         ),
-        advanced_kwargs={
-            # Generic enable flags
-            "use_frame_smoothing": True,
-            "use_min_duration": True,
-            "use_min_note_duration": True,
-            "use_duplicate_removal": True,
-            "use_velocity_duplicate_removal": True,
-            "enable_frame_smoothing": True,
-            "enable_min_duration": True,
-            "enable_min_note_duration": True,
-            "enable_duplicate_removal": True,
-            "enable_velocity_duplicate_removal": True,
-            # Explicitly keep other experimental methods off for the M2+M3+M4 table.
-            "use_onset_conditioned_offsets": False,
-            "use_adaptive_thresholds": False,
-            "use_chord_grouping": False,
-            "use_sustain_extension": False,
-            "enable_onset_conditioned_offsets": False,
-            "enable_adaptive_thresholds": False,
-            "enable_chord_grouping": False,
-            "enable_sustain_extension": False,
-            # Common tuned numeric parameters / aliases.
-            "frame_smoothing_method": "median",
-            "smoothing_method": "median",
-            "median_kernel_size": 3,
-            "smooth_kernel_size": 3,
-            "min_note_duration_s": 0.05,
-            "min_duration_s": 0.05,
-            "min_note_ms": 50.0,
-            "duplicate_tolerance_s": 0.03,
-            "duplicate_time_tolerance_s": 0.03,
-            "duplicate_tolerance_ms": 30.0,
-        },
+        use_frame_smoothing=True,
+        frame_smoothing_kernel=3,
+        frame_smoothing_method="closing",
+        min_note_duration_ms=55.0,
+        use_duplicate_removal=True,
+        duplicate_tolerance_sec=0.06,
     ),
-    "efficient_m3_m4": DecoderPreset(
-        name="efficient_m3_m4",
-        label="Efficient mode — M3 + M4",
-        description=(
-            "Fast decoder for live demonstrations: minimum duration and "
-            "velocity-aware duplicate removal, without frame smoothing."
-        ),
-        advanced_kwargs={
-            "use_frame_smoothing": False,
-            "enable_frame_smoothing": False,
-            "use_min_duration": True,
-            "use_min_note_duration": True,
-            "use_duplicate_removal": True,
-            "use_velocity_duplicate_removal": True,
-            "enable_min_duration": True,
-            "enable_min_note_duration": True,
-            "enable_duplicate_removal": True,
-            "enable_velocity_duplicate_removal": True,
-            "use_onset_conditioned_offsets": False,
-            "use_adaptive_thresholds": False,
-            "use_chord_grouping": False,
-            "use_sustain_extension": False,
-            "enable_onset_conditioned_offsets": False,
-            "enable_adaptive_thresholds": False,
-            "enable_chord_grouping": False,
-            "enable_sustain_extension": False,
-            "min_note_duration_s": 0.05,
-            "min_duration_s": 0.05,
-            "min_note_ms": 50.0,
-            "duplicate_tolerance_s": 0.03,
-            "duplicate_time_tolerance_s": 0.03,
-            "duplicate_tolerance_ms": 30.0,
-        },
+    # Optional single-method modes for live explanation.
+    "m2_only": AdvancedDecoderConfig(
+        name="demo_m2_only",
+        label="M2 only — frame smoothing",
+        description="Only frame-level closing smoothing is enabled.",
+        use_frame_smoothing=True,
+        frame_smoothing_kernel=3,
+        frame_smoothing_method="closing",
+        min_note_duration_ms=16.0,
+    ),
+    "m3_only": AdvancedDecoderConfig(
+        name="demo_m3_only",
+        label="M3 only — minimum duration",
+        description="Only minimum note duration is enabled.",
+        min_note_duration_ms=55.0,
+    ),
+    "m4_only": AdvancedDecoderConfig(
+        name="demo_m4_only",
+        label="M4 only — duplicate removal",
+        description="Only velocity-aware duplicate removal is enabled.",
+        use_duplicate_removal=True,
+        duplicate_tolerance_sec=0.06,
     ),
 }
 
+DEFAULT_MODE = "quality_m2_m3_m4"
+DEFAULT_ONSET_THRESHOLD = 0.40
+DEFAULT_FRAME_THRESHOLD = 0.40
+DEFAULT_OFFSET_THRESHOLD = 0.50
 
-def list_decoder_modes() -> list[str]:
-    return list(ADVANCED_DECODER_PRESETS.keys())
+
+def list_decoder_modes(include_single_methods: bool = True) -> list[str]:
+    if include_single_methods:
+        return list(ADVANCED_DECODER_PRESETS.keys())
+    return ["baseline", "efficient_m3_m4", "quality_m2_m3_m4"]
 
 
-def get_decoder_preset(mode: str) -> DecoderPreset:
+def get_decoder_preset(mode: str = DEFAULT_MODE) -> AdvancedDecoderConfig:
     if mode not in ADVANCED_DECODER_PRESETS:
         valid = ", ".join(ADVANCED_DECODER_PRESETS)
         raise KeyError(f"Unknown decoder mode {mode!r}. Valid modes: {valid}")
     return ADVANCED_DECODER_PRESETS[mode]
+
+
+def make_decoder_config(
+    mode: str = DEFAULT_MODE,
+    overrides: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> AdvancedDecoderConfig:
+    merged: Dict[str, Any] = {}
+    if overrides:
+        merged.update(dict(overrides))
+    merged.update(kwargs)
+    return get_decoder_preset(mode).with_overrides(**merged) if merged else get_decoder_preset(mode)
+
+
+def config_table_dict(cfg: AdvancedDecoderConfig) -> Dict[str, Any]:
+    return asdict(cfg)
