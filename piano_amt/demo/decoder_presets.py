@@ -81,9 +81,12 @@ class AdvancedDecoderConfig:
 
 ADVANCED_DECODER_PRESETS: Dict[str, AdvancedDecoderConfig] = {
     "baseline": AdvancedDecoderConfig(
-        name="baseline_0p4_0p4",
-        label="Baseline decoder — original rolls_to_note_events",
-        description="Original baseline decoder using onset/frame thresholds only.",
+        name="adv_baseline",
+        label="Tuned baseline — no post-processing",
+        description=(
+            "No post-processing. Original onset-gated baseline decoder at the "
+            "tuned prediction thresholds 0.4/0.4."
+        ),
         decoder_type="baseline",
         onset_threshold=0.40,
         frame_threshold=0.40,
