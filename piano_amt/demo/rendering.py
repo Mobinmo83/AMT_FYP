@@ -813,24 +813,30 @@ def plot_midi_notes_velocity(
 
     return fig
 
-
 def render_visual_midi(
     pm_or_path,
     html_path: str | Path | None = None,
-    show_inline: bool = False,
-    plot_width: int = 1000,
-    plot_height: int = 360,
+    show_inline: bool = True,
+    plot_width: int = 1100,
+    plot_height: int = 380,
 ):
-    """Render Visual MIDI quietly and safely.
+    """Render Visual MIDI once, cleanly, using saved HTML + IFrame.
 
-    Visual MIDI is presentation-only. This wrapper suppresses Bokeh/Visual MIDI
-    warning spam and prevents optional rendering from breaking transcription.
+    This avoids duplicate notebook output by never calling both
+    plotter.show(...) and plotter.show_notebook(...).
+
+    Recommended demo behaviour:
+    - save HTML to html_path
+    - display the saved HTML once as an IFrame
     """
+    from IPython.display import IFrame, display
+
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             warnings.filterwarnings("ignore", message=".*HSL.*")
             warnings.filterwarnings("ignore", message=".*BokehDeprecationWarning.*")
+
             try:
                 from bokeh.util.warnings import BokehDeprecationWarning
                 warnings.filterwarnings("ignore", category=BokehDeprecationWarning)
@@ -838,19 +844,32 @@ def render_visual_midi(
                 pass
 
             from visual_midi import Plotter, Preset
+
     except Exception as exc:
         print(f"Visual MIDI unavailable: could not import visual_midi ({exc})")
         return None
 
     try:
         pm = pretty_midi.PrettyMIDI(str(pm_or_path)) if isinstance(pm_or_path, (str, Path)) else pm_or_path
-        preset = Preset(plot_width=plot_width, plot_height=plot_height)
+
+        preset = Preset(
+            plot_width=int(plot_width),
+            plot_height=int(plot_height),
+        )
+
         plotter = Plotter(preset)
+
     except Exception as exc:
         print(f"Visual MIDI unavailable: setup failed ({exc})")
         return None
 
-    result = None
+    if html_path is None:
+        html_path = Path("visual_midi_output.html")
+    else:
+        html_path = Path(html_path)
+
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+
     silent_stdout = io.StringIO()
     silent_stderr = io.StringIO()
 
@@ -865,28 +884,24 @@ def render_visual_midi(
         except Exception:
             pass
 
-        if html_path is not None:
-            html_path = Path(html_path)
-            html_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            # IMPORTANT:
+            # Use save only. Do not use plotter.show(...) here,
+            # because show can display as well as save in notebook contexts.
+            with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
+                plotter.save(pm, str(html_path))
 
+        except Exception:
             try:
+                # Fallback: some visual_midi versions behave differently.
+                # This may save the file, but we still do not call show_notebook.
                 with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
-                    result = plotter.show(pm, str(html_path))
-            except Exception:
-                try:
-                    with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
-                        result = plotter.save(pm, str(html_path))
-                except Exception as exc:
-                    print(f"Visual MIDI HTML rendering skipped: {exc}")
-                    result = None
-
-        if show_inline:
-            try:
-                with contextlib.redirect_stdout(silent_stdout), contextlib.redirect_stderr(silent_stderr):
-                    notebook_result = plotter.show_notebook(pm)
-                if notebook_result is not None:
-                    result = notebook_result
+                    plotter.show(pm, str(html_path))
             except Exception as exc:
-                print(f"Visual MIDI inline display skipped: {exc}")
+                print(f"Visual MIDI HTML rendering skipped: {exc}")
+                return None
 
-    return result
+    if show_inline:
+        display(IFrame(src=str(html_path), width="100%", height=int(plot_height) + 70))
+
+    return html_path
