@@ -10,6 +10,7 @@ import soundfile as sf
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from matplotlib.patches import Patch, Rectangle
+from matplotlib.ticker import MultipleLocator
 
 import contextlib
 import io
@@ -205,7 +206,7 @@ def select_demo_window(
     parsed = [_event_to_fields(ev) for ev in note_events]
     max_time = max(offset for _, offset, _, _ in parsed)
 
-    # Corrected: do not force a long 25s empty tail if the MIDI is shorter.
+    # Corrected: do not force a long empty tail if the MIDI is shorter.
     if max_time <= duration_sec:
         return 0.0, float(max_time)
 
@@ -599,6 +600,31 @@ def _velocity_norm(parsed: Sequence[tuple[float, float, int, float]]) -> Normali
     return Normalize(vmin=0.0, vmax=127.0)
 
 
+def _style_midi_axis(
+    ax,
+    *,
+    start_time: float,
+    end_time: float,
+    major_tick_sec: float = 5.0,
+    minor_tick_sec: float = 1.0,
+    facecolor: str = "white",
+) -> None:
+    """Apply a clean dissertation/demo style to MIDI axes."""
+    ax.set_facecolor(facecolor)
+    ax.set_xlim(start_time, end_time)
+
+    if major_tick_sec is not None and major_tick_sec > 0:
+        ax.xaxis.set_major_locator(MultipleLocator(major_tick_sec))
+    if minor_tick_sec is not None and minor_tick_sec > 0:
+        ax.xaxis.set_minor_locator(MultipleLocator(minor_tick_sec))
+
+    ax.grid(True, which="major", axis="x", alpha=0.28, linewidth=0.8)
+    ax.grid(True, which="minor", axis="x", alpha=0.10, linewidth=0.45)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+
 def _draw_note_bars(
     ax,
     parsed: Sequence[tuple[float, float, int, float]],
@@ -676,6 +702,11 @@ def plot_midi_event_bars(
     pitch_max: int = PIANO_HIGH,
     figsize=(14, 6),
     cmap_name: str = "viridis",
+    facecolor: str = "white",
+    major_tick_sec: float = 5.0,
+    minor_tick_sec: float = 1.0,
+    bar_height: float = 0.78,
+    edgecolor: str = "black",
 ):
     """Professional MIDI-style note-event plot.
 
@@ -689,9 +720,18 @@ def plot_midi_event_bars(
     start, end = _resolve_time_window(parsed, start_time, end_time, window_duration)
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
+    fig.patch.set_facecolor(facecolor)
 
     if not parsed:
         ax.text(0.5, 0.5, "No note events", ha="center", va="center", transform=ax.transAxes)
+        _style_midi_axis(
+            ax,
+            start_time=start,
+            end_time=end,
+            major_tick_sec=major_tick_sec,
+            minor_tick_sec=minor_tick_sec,
+            facecolor=facecolor,
+        )
     else:
         visible = _clip_events_to_window(parsed, start, end)
         if visible:
@@ -707,6 +747,8 @@ def plot_midi_event_bars(
             end_time=end,
             color_mode="velocity",
             cmap_name=cmap_name,
+            bar_height=bar_height,
+            edgecolor=edgecolor,
             velocity_norm=_velocity_norm(parsed),
         )
 
@@ -715,18 +757,60 @@ def plot_midi_event_bars(
             cbar.set_label("Velocity")
 
         _set_pitch_axis(ax, min_pitch, max_pitch)
+        _style_midi_axis(
+            ax,
+            start_time=start,
+            end_time=end,
+            major_tick_sec=major_tick_sec,
+            minor_tick_sec=minor_tick_sec,
+            facecolor=facecolor,
+        )
 
-    ax.set_xlim(start, end)
     ax.set_title(title)
     ax.set_xlabel("Time (s)")
-    ax.grid(True, axis="x", alpha=0.25)
     fig.tight_layout()
 
     if save_path is not None:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), bbox_inches="tight", dpi=180, facecolor="white")
+        fig.savefig(str(save_path), bbox_inches="tight", dpi=200, facecolor=facecolor)
 
     return fig
+
+
+def plot_prediction_midi_excerpt(
+    note_events: Iterable,
+    title: str = "Predicted MIDI excerpt",
+    save_path: str | Path | None = None,
+    *,
+    start_time: float | None = None,
+    end_time: float | None = None,
+    window_duration: float | None = 40.0,
+    pitch_min: int = PIANO_LOW,
+    pitch_max: int = PIANO_HIGH,
+    figsize=(16, 7),
+    cmap_name: str = "viridis",
+):
+    """Dissertation-friendly single-view MIDI excerpt plot.
+
+    White background, precise time grid, labelled pitch axis, and velocity colour.
+    """
+    return plot_midi_event_bars(
+        note_events,
+        title=title,
+        save_path=save_path,
+        start_time=start_time,
+        end_time=end_time,
+        window_duration=window_duration,
+        pitch_min=pitch_min,
+        pitch_max=pitch_max,
+        figsize=figsize,
+        cmap_name=cmap_name,
+        facecolor="white",
+        major_tick_sec=5.0,
+        minor_tick_sec=1.0,
+        bar_height=0.78,
+        edgecolor="black",
+    )
 
 
 # Backwards-compatible name used in your notebook.
@@ -822,6 +906,7 @@ def plot_decoded_event_roll(
     )
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
+    fig.patch.set_facecolor("white")
     extent = [start, end, pitch_min - 0.5, pitch_max + 0.5]
 
     im = ax.imshow(
@@ -838,6 +923,7 @@ def plot_decoded_event_roll(
     ax.set_title(title)
     ax.set_xlabel("Time (s)")
     _set_pitch_axis(ax, pitch_min, pitch_max)
+    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
 
     cbar = fig.colorbar(im, ax=ax, pad=0.01)
     cbar.set_label("Velocity / note intensity")
@@ -893,6 +979,7 @@ def plot_event_roll_comparison(
     )
 
     fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True, sharey=True)
+    fig.patch.set_facecolor("white")
     extent = [start, end, pitch_min - 0.5, pitch_max + 0.5]
 
     im0 = axes[0].imshow(
@@ -907,6 +994,7 @@ def plot_event_roll_comparison(
     )
     axes[0].set_title(reference_label)
     _set_pitch_axis(axes[0], pitch_min, pitch_max)
+    _style_midi_axis(axes[0], start_time=start, end_time=end, facecolor="white")
 
     im1 = axes[1].imshow(
         pred_roll,
@@ -921,9 +1009,7 @@ def plot_event_roll_comparison(
     axes[1].set_title(predicted_label)
     axes[1].set_xlabel("Time (s)")
     _set_pitch_axis(axes[1], pitch_min, pitch_max)
-
-    for ax in axes:
-        ax.grid(True, axis="x", alpha=0.20)
+    _style_midi_axis(axes[1], start_time=start, end_time=end, facecolor="white")
 
     fig.colorbar(im0, ax=axes[0], pad=0.01, label="Reference intensity")
     fig.colorbar(im1, ax=axes[1], pad=0.01, label="Predicted velocity / intensity")
@@ -963,6 +1049,7 @@ def plot_event_bar_comparison(
     start, end = _resolve_time_window(both, start_time, end_time, window_duration)
 
     fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True, sharey=True)
+    fig.patch.set_facecolor("white")
 
     _draw_note_bars(
         axes[0],
@@ -977,6 +1064,7 @@ def plot_event_bar_comparison(
     )
     axes[0].set_title(reference_label)
     _set_pitch_axis(axes[0], pitch_min, pitch_max)
+    _style_midi_axis(axes[0], start_time=start, end_time=end, facecolor="white")
 
     sm = _draw_note_bars(
         axes[1],
@@ -993,13 +1081,10 @@ def plot_event_bar_comparison(
     axes[1].set_title(predicted_label)
     axes[1].set_xlabel("Time (s)")
     _set_pitch_axis(axes[1], pitch_min, pitch_max)
+    _style_midi_axis(axes[1], start_time=start, end_time=end, facecolor="white")
 
     if sm is not None:
         fig.colorbar(sm, ax=axes[1], pad=0.01, label="Predicted velocity")
-
-    for ax in axes:
-        ax.set_xlim(start, end)
-        ax.grid(True, axis="x", alpha=0.25)
 
     fig.suptitle(title)
     fig.tight_layout()
@@ -1069,6 +1154,7 @@ def plot_event_roll_diff(
     rgb[missed] = np.array([0.20, 0.35, 0.90], dtype=np.float32)
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
+    fig.patch.set_facecolor("white")
     extent = [start, end, pitch_min - 0.5, pitch_max + 0.5]
 
     ax.imshow(
@@ -1082,6 +1168,7 @@ def plot_event_roll_diff(
     ax.set_title(title)
     ax.set_xlabel("Time (s)")
     _set_pitch_axis(ax, pitch_min, pitch_max)
+    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
     ax.legend(
         handles=[
             Patch(facecolor=(0.20, 0.70, 0.25), label="Overlap"),
@@ -1177,6 +1264,7 @@ def plot_raw_frame_posterior(
         cbar_label = "Frame activation probability"
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
+    fig.patch.set_facecolor("white")
     extent = [start, end, PIANO_LOW - 0.5, PIANO_HIGH + 0.5]
 
     im = ax.imshow(
@@ -1193,6 +1281,7 @@ def plot_raw_frame_posterior(
     ax.set_title(title)
     ax.set_xlabel("Time (s)")
     _set_pitch_axis(ax)
+    _style_midi_axis(ax, start_time=start, end_time=end, facecolor="white")
 
     cbar = fig.colorbar(im, ax=ax, pad=0.01)
     cbar.set_label(cbar_label)
@@ -1235,6 +1324,7 @@ def plot_piano_roll_side_by_side(
 
     if gt is None:
         fig, ax = plt.subplots(1, 1, figsize=(14, 5))
+        fig.patch.set_facecolor("white")
         ax.imshow(
             pred_img,
             aspect="auto",
@@ -1248,10 +1338,12 @@ def plot_piano_roll_side_by_side(
         ax.set_title(title)
         ax.set_xlabel("Time (s)")
         _set_pitch_axis(ax)
+        _style_midi_axis(ax, start_time=0.0, end_time=duration_s, facecolor="white")
     else:
         gt_img = (gt[:n_frames].T > 0.5).astype(np.float32)
 
         fig, axes = plt.subplots(2, 1, figsize=(14, 7), sharex=True, sharey=True)
+        fig.patch.set_facecolor("white")
 
         axes[0].imshow(
             gt_img,
@@ -1264,6 +1356,7 @@ def plot_piano_roll_side_by_side(
             extent=extent,
         )
         axes[0].set_title("Cached GT frame label roll")
+        _style_midi_axis(axes[0], start_time=0.0, end_time=duration_s, facecolor="white")
 
         axes[1].imshow(
             pred_img,
@@ -1276,6 +1369,7 @@ def plot_piano_roll_side_by_side(
             extent=extent,
         )
         axes[1].set_title("Raw predicted frame roll")
+        _style_midi_axis(axes[1], start_time=0.0, end_time=duration_s, facecolor="white")
 
         for ax in axes:
             _set_pitch_axis(ax)
@@ -1331,11 +1425,13 @@ def plot_roll_diff(
     extent = [0, duration_s, PIANO_LOW - 0.5, PIANO_HIGH + 0.5]
 
     fig, ax = plt.subplots(1, 1, figsize=(14, 5))
+    fig.patch.set_facecolor("white")
     ax.imshow(rgb, aspect="auto", origin="lower", interpolation="nearest", extent=extent)
 
     ax.set_title(title)
     ax.set_xlabel("Time (s)")
     _set_pitch_axis(ax)
+    _style_midi_axis(ax, start_time=0.0, end_time=duration_s, facecolor="white")
 
     ax.legend(
         handles=[
@@ -1381,6 +1477,7 @@ def plot_midi_with_sustain_and_velocity(
         sharex=True,
         gridspec_kw={"height_ratios": [4, 1]},
     )
+    fig.patch.set_facecolor("white")
 
     sm = _draw_note_bars(
         ax_notes,
@@ -1398,7 +1495,7 @@ def plot_midi_with_sustain_and_velocity(
 
     ax_notes.set_title(title)
     _set_pitch_axis(ax_notes)
-    ax_notes.grid(True, axis="x", alpha=0.25)
+    _style_midi_axis(ax_notes, start_time=start, end_time=end, facecolor="white")
 
     cc_points: list[tuple[float, int]] = []
     for inst in pm.instruments:
@@ -1425,8 +1522,7 @@ def plot_midi_with_sustain_and_velocity(
 
     ax_pedal.set_ylabel("Sustain CC64")
     ax_pedal.set_xlabel("Time (s)")
-    ax_pedal.grid(True, axis="x", alpha=0.25)
-    ax_pedal.set_xlim(start, end)
+    _style_midi_axis(ax_pedal, start_time=start, end_time=end, facecolor="white")
 
     fig.tight_layout()
 
