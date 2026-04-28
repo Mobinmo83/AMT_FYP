@@ -38,6 +38,17 @@ PIANO_PROGRAMS = {
 }
 
 
+# Suppress common Visual MIDI / Bokeh warning spam globally for demo notebooks.
+try:
+    from bokeh.util.warnings import BokehDeprecationWarning
+
+    warnings.filterwarnings("ignore", category=BokehDeprecationWarning)
+except Exception:
+    pass
+
+warnings.filterwarnings("ignore", message=".*HSL.*")
+warnings.filterwarnings("ignore", message=".*BokehDeprecationWarning.*")
+
 
 def _velocity_to_midi_value(v) -> int:
     v = float(v)
@@ -116,7 +127,7 @@ def crop_pretty_midi(
             if new_end > new_start:
                 new_inst.notes.append(
                     pretty_midi.Note(
-                        velocity=int(n.velocity),
+                        velocity=int(np.clip(n.velocity, 1, 127)),
                         pitch=int(n.pitch),
                         start=float(new_start),
                         end=float(new_end),
@@ -194,8 +205,9 @@ def select_demo_window(
     parsed = [_event_to_fields(ev) for ev in note_events]
     max_time = max(offset for _, offset, _, _ in parsed)
 
+    # Corrected: do not force a long 25s empty tail if the MIDI is shorter.
     if max_time <= duration_sec:
-        return 0.0, max(float(duration_sec), float(max_time))
+        return 0.0, float(max_time)
 
     best_start = 0.0
     best_score = -1.0
@@ -432,6 +444,16 @@ def midi_to_events(pm: pretty_midi.PrettyMIDI) -> list[DemoNoteEvent]:
 
     events.sort(key=lambda e: (e.onset_sec, e.pitch, e.offset_sec))
     return events
+
+
+def midi_path_to_events(midi_path: str | Path) -> list[DemoNoteEvent]:
+    """Load a MIDI file and convert it into demo note events.
+
+    Use this for final predicted-MIDI visualisation so the displayed notes are
+    guaranteed to match the downloadable MIDI file.
+    """
+    pm = pretty_midi.PrettyMIDI(str(midi_path))
+    return midi_to_events(pm)
 
 
 def _event_to_fields(event) -> tuple[float, float, int, float]:
@@ -1415,7 +1437,6 @@ def plot_midi_with_sustain_and_velocity(
     return fig
 
 
-
 def render_visual_midi(
     pm_or_path,
     html_path: str | Path | None = None,
@@ -1431,6 +1452,14 @@ def render_visual_midi(
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
+            warnings.filterwarnings("ignore", message=".*HSL.*")
+            warnings.filterwarnings("ignore", message=".*BokehDeprecationWarning.*")
+            try:
+                from bokeh.util.warnings import BokehDeprecationWarning
+                warnings.filterwarnings("ignore", category=BokehDeprecationWarning)
+            except Exception:
+                pass
+
             from visual_midi import Plotter, Preset
     except Exception as exc:
         print(f"Visual MIDI unavailable: could not import visual_midi ({exc})")
@@ -1445,14 +1474,19 @@ def render_visual_midi(
         return None
 
     result = None
+    silent_stdout = io.StringIO()
+    silent_stderr = io.StringIO()
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
         warnings.filterwarnings("ignore", message=".*HSL.*")
         warnings.filterwarnings("ignore", message=".*BokehDeprecationWarning.*")
 
-        silent_stdout = io.StringIO()
-        silent_stderr = io.StringIO()
+        try:
+            from bokeh.util.warnings import BokehDeprecationWarning
+            warnings.filterwarnings("ignore", category=BokehDeprecationWarning)
+        except Exception:
+            pass
 
         if html_path is not None:
             html_path = Path(html_path)
