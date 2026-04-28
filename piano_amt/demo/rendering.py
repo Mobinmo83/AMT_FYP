@@ -1033,16 +1033,13 @@ def plot_event_bar_comparison(
     *,
     start_time: float | None = None,
     end_time: float | None = None,
-    window_duration: float | None = 60.0,
+    window_duration: float | None = None,
     pitch_min: int = PIANO_LOW,
     pitch_max: int = PIANO_HIGH,
-    figsize=(14, 7),
+    figsize=(16, 9),
+    cmap_name: str = "viridis",
 ):
-    """Duration-aware event comparison using horizontal MIDI note bars.
-
-    This is better than scatter for dissertation/demo comparison because it shows
-    both onset timing and note duration.
-    """
+    """Duration-aware two-panel MIDI comparison with consistent velocity colouring."""
     ref_parsed = _parse_events(reference_events)
     pred_parsed = _parse_events(predicted_events)
     both = list(ref_parsed) + list(pred_parsed)
@@ -1051,50 +1048,53 @@ def plot_event_bar_comparison(
     fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True, sharey=True)
     fig.patch.set_facecolor("white")
 
-    _draw_note_bars(
+    shared_norm = _velocity_norm(both)
+
+    sm0 = _draw_note_bars(
         axes[0],
         ref_parsed,
         start_time=start,
         end_time=end,
-        color_mode="fixed",
-        fixed_color="#4A4A4A",
-        alpha=0.75,
-        linewidth=0.05,
-        edgecolor="#222222",
+        color_mode="velocity",
+        cmap_name=cmap_name,
+        alpha=0.88,
+        linewidth=0.10,
+        edgecolor="black",
+        velocity_norm=shared_norm,
     )
     axes[0].set_title(reference_label)
     _set_pitch_axis(axes[0], pitch_min, pitch_max)
     _style_midi_axis(axes[0], start_time=start, end_time=end, facecolor="white")
 
-    sm = _draw_note_bars(
+    sm1 = _draw_note_bars(
         axes[1],
         pred_parsed,
         start_time=start,
         end_time=end,
         color_mode="velocity",
-        cmap_name="viridis",
+        cmap_name=cmap_name,
         alpha=0.88,
         linewidth=0.10,
         edgecolor="black",
-        velocity_norm=_velocity_norm(pred_parsed),
+        velocity_norm=shared_norm,
     )
     axes[1].set_title(predicted_label)
     axes[1].set_xlabel("Time (s)")
     _set_pitch_axis(axes[1], pitch_min, pitch_max)
     _style_midi_axis(axes[1], start_time=start, end_time=end, facecolor="white")
 
+    sm = sm1 if sm1 is not None else sm0
     if sm is not None:
-        fig.colorbar(sm, ax=axes[1], pad=0.01, label="Predicted velocity")
+        fig.colorbar(sm, ax=axes, pad=0.01, label="MIDI velocity")
 
     fig.suptitle(title)
     fig.tight_layout()
 
     if save_path is not None:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), bbox_inches="tight", dpi=180, facecolor="white")
+        fig.savefig(str(save_path), bbox_inches="tight", dpi=200, facecolor="white")
 
     return fig
-
 
 def plot_event_roll_diff(
     reference_events: Iterable,
@@ -1454,17 +1454,18 @@ def plot_roll_diff(
 # ---------------------------------------------------------------------------
 # Original MIDI / sustain visualisation
 # ---------------------------------------------------------------------------
-
 def plot_midi_with_sustain_and_velocity(
     midi_path: str | Path,
-    title: str = "Original MAESTRO MIDI: notes, velocity and sustain",
+    title: str = "MIDI: notes, velocity and sustain",
     save_path: str | Path | None = None,
     *,
     start_time: float | None = None,
     end_time: float | None = None,
     window_duration: float | None = None,
+    figsize=(16, 7),
+    cmap_name: str = "viridis",
 ):
-    """Plot original MIDI notes as bars plus sustain CC64 below."""
+    """Plot MIDI notes as velocity-coloured bars plus sustain CC64 below."""
     pm = pretty_midi.PrettyMIDI(str(midi_path))
     events = midi_to_events(pm)
     parsed = _parse_events(events)
@@ -1473,7 +1474,7 @@ def plot_midi_with_sustain_and_velocity(
     fig, (ax_notes, ax_pedal) = plt.subplots(
         2,
         1,
-        figsize=(14, 7),
+        figsize=figsize,
         sharex=True,
         gridspec_kw={"height_ratios": [4, 1]},
     )
@@ -1485,9 +1486,11 @@ def plot_midi_with_sustain_and_velocity(
         start_time=start,
         end_time=end,
         color_mode="velocity",
-        cmap_name="plasma",
+        cmap_name=cmap_name,
         alpha=0.88,
         velocity_norm=_velocity_norm(parsed),
+        linewidth=0.15,
+        edgecolor="black",
     )
 
     if sm is not None:
@@ -1528,7 +1531,7 @@ def plot_midi_with_sustain_and_velocity(
 
     if save_path is not None:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_path), dpi=180, bbox_inches="tight", facecolor="white")
+        fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
 
     return fig
 

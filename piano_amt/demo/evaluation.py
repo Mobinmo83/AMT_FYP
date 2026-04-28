@@ -281,10 +281,30 @@ def evaluate_prediction_vs_gt(
 def main_scores_table(results: Dict[str, Dict[str, float]]) -> pd.DataFrame:
     m = results["metrics"]
     return pd.DataFrame([
-        {"Metric": "Frame", "Precision": m.get("frame_precision", 0.0), "Recall": m.get("frame_recall", 0.0), "F1": m.get("frame_f1", 0.0)},
-        {"Metric": "Note", "Precision": m.get("note_precision", 0.0), "Recall": m.get("note_recall", 0.0), "F1": m.get("note_f1", 0.0)},
-        {"Metric": "Note + offset", "Precision": m.get("note_with_offset_precision", 0.0), "Recall": m.get("note_with_offset_recall", 0.0), "F1": m.get("note_with_offset_f1", 0.0)},
-        {"Metric": "Note + offset + velocity", "Precision": m.get("note_with_offset_vel_precision", 0.0), "Recall": m.get("note_with_offset_vel_recall", 0.0), "F1": m.get("note_with_offset_vel_f1", 0.0)},
+        {
+            "Metric": "Note",
+            "Precision": m.get("note_precision", 0.0),
+            "Recall": m.get("note_recall", 0.0),
+            "F1": m.get("note_f1", 0.0),
+        },
+        {
+            "Metric": "Note + offset",
+            "Precision": m.get("note_with_offset_precision", 0.0),
+            "Recall": m.get("note_with_offset_recall", 0.0),
+            "F1": m.get("note_with_offset_f1", 0.0),
+        },
+        {
+            "Metric": "Note + offset + velocity",
+            "Precision": m.get("note_with_offset_vel_precision", 0.0),
+            "Recall": m.get("note_with_offset_vel_recall", 0.0),
+            "F1": m.get("note_with_offset_vel_f1", 0.0),
+        },
+        {
+            "Metric": "Frame",
+            "Precision": m.get("frame_precision", 0.0),
+            "Recall": m.get("frame_recall", 0.0),
+            "F1": m.get("frame_f1", 0.0),
+        },
     ])
 
 
