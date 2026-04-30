@@ -37,7 +37,6 @@ import torch
 def check_constants() -> None:
     """
     Assert that all critical constants have the exact values mandated by
-    Hawthorne 2018a §3 and jongwook/onsets-and-frames.
     """
     print("[1] check_constants")
     from src.constants import (
