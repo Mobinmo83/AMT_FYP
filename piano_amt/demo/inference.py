@@ -1,3 +1,33 @@
+"""
+demo inference — full-length model prediction, note-event decoding, and MIDI output.
+
+Purpose:
+  This file handles the inference stage of the public demo. It runs the loaded
+  model on a log-mel spectrogram, decodes prediction rolls into note events
+  using the selected demo decoder mode, and saves predicted or ground-truth
+  MIDI files for listening, visualisation, and comparison.
+
+Design:
+  - run_model_on_mel() performs full-length single-pass inference and returns
+    onset, frame, offset, and velocity prediction rolls on CPU.
+  - DemoNoteEvent provides a compact event format used across demo evaluation,
+    plotting, MIDI writing, and comparison utilities.
+  - prediction_to_note_events() decodes model predictions through either the
+    baseline decoder or the advanced decoder preset.
+  - gt_rolls_to_note_events() decodes cached ground-truth rolls at fixed
+    thresholds so the reference event set remains stable.
+  - note_events_to_pretty_midi() converts decoded events into a PrettyMIDI
+    object.
+  - save_prediction_midi() and save_gt_eval_midi() write MIDI files into the
+    demo output directory.
+
+Outputs:
+  - Prediction dictionaries containing model output rolls.
+  - Decoded note-event lists for evaluation and plotting.
+  - PrettyMIDI objects for predicted and reference transcriptions.
+  - Saved .mid files for demo playback, download, and qualitative inspection.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

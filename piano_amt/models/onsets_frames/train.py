@@ -8,18 +8,24 @@ Design:
     so training progress is always visible for the report.
   - All epoch losses + timing data are stored in metrics.json and updated after
     every epoch so the file is always up-to-date even if Colab disconnects.
-  - The model uses post-sigmoid outputs, so BCELoss is used (not BCEWithLogits).
-  - Per-parameter gradient clipping matches jongwook's implementation.
-  - ReduceLROnPlateau scheduler halves LR after 3 epochs without improvement.
-  - EVERY epoch is checkpointed (latest.pt + best.pt) for Colab crash safety.
+  - The model uses post-sigmoid outputs, so manual BCE is used
+    rather than BCEWithLogits.
+  - Per-parameter gradient clipping is applied for stable optimisation.
+  - A step-based learning-rate scheduler gradually decays the LR during training.
+  - latest.pt is saved every epoch for Colab crash safety.
+  - best.pt is updated whenever validation loss improves and is used for
+    final evaluation.
+  - Periodic epoch checkpoints are saved to keep an audit trail without storing
+    unnecessary checkpoint files every epoch.
   - Full resume support: model, optimizer, scheduler, epoch, best_val_loss,
-    global_step, timing history, and metrics history are all restored.
+    global_step, timing history, metrics history, and AMP scaler state are all
+    restored.
 
 Loss function:
   onset/frame/offset — weighted manual BCE (pos_weight configurable per head)
   velocity           — masked MSE at onset positions only
 
-  Default pos_weight=1.0 (plain BCE) matches jongwook at full-dataset scale.
+  Default pos_weight=1.0 uses plain BCE at full-dataset scale.
   For small subsets (≤400 files), set pos_weight_onset/offset=25.0,
   pos_weight_frame=6.0 to prevent near-zero collapse caused by
   ~460:1 onset label sparsity on MAESTRO. Values are set via CONFIG
@@ -42,10 +48,6 @@ Resume after disconnect:
         --runs_dir     /content/drive/MyDrive/piano_amt/runs \\
         --resume       /content/drive/MyDrive/piano_amt/runs/of_baseline_full/checkpoints/latest.pt \\
         --epochs       50
-
-Papers:
-  Hawthorne 2018a §3.2: Adam lr=6e-4, grad clip norm 3.0, masked MSE velocity.
-  jongwook/onsets-and-frames: per-param grad clip, batch_size=8, plain BCE.
 """
 
 from __future__ import annotations

@@ -1,24 +1,33 @@
 """
 models/onsets_frames/model.py — OnsetsAndFrames neural network.
 
-Architecture: jongwook/onsets-and-frames PyTorch implementation, adapted for
+Architecture: Onsets and Frames style PyTorch implementation, adapted for
 this pipeline's tensor conventions (mel input (B,229,T), outputs (B,T,88)).
 
-This file is a faithful reproduction of jongwook/onsets-and-frames
-transcriber.py with the following adaptations for this pipeline:
-  - Input mel shape is (B, N_MELS, T) = (B, 229, T), transposed internally
-    to match jongwook's (B, T, F) convention before entering ConvStack.
-  - Output is a Dict[str, Tensor] instead of a 5-tuple, for compatibility
-    with OnsetsFramesLoss in train.py.
+This file defines the neural transcription model used by the training,
+evaluation, and decoding pipeline. It maps log-mel spectrograms to four
+time-aligned output heads:
+  - onset probabilities
+  - frame probabilities
+  - offset probabilities
+  - velocity predictions
 
-jongwook improvements over Hawthorne 2018a paper (all 5 reproduced here):
+Pipeline adaptations:
+  - Input mel shape is (B, N_MELS, T) = (B, 229, T), transposed internally
+    to (B, T, F) before entering ConvStack.
+  - Output is a Dict[str, Tensor] instead of a positional tuple, so the
+    training loss and decoder can access heads by name.
+  - onset/frame/offset outputs are post-sigmoid probabilities in [0,1].
+  - velocity output is raw and is trained with masked MSE at onset positions.
+
+Implemented model details:
   1. Offset stack  — separate CNN+BiLSTM+Linear+Sigmoid head.
-  2. Gradient stop — onset AND offset detached at combined junction.
+  2. Gradient stop — onset AND offset detached at combined frame junction.
   3. Increased capacity — model_complexity=48 → model_size=768 → ~26M params.
   4. Per-parameter gradient clipping — handled in train.py.
-  5. HTK-style mel with fmin=30 — handled in audio.py.
+  5. Mel front-end configuration — handled in audio.py.
 
-ConvStack (jongwook transcriber.py lines 12–42):
+ConvStack:
   Conv2d(1, ch1, 3×3, pad=1) → BN → ReLU          ch1 = model_size // 16
   Conv2d(ch1, ch1, 3×3, pad=1) → BN → ReLU
   MaxPool2d(1, 2) → Dropout(0.25)                   pools freq axis
@@ -26,7 +35,7 @@ ConvStack (jongwook transcriber.py lines 12–42):
   MaxPool2d(1, 2) → Dropout(0.25)                   pools freq axis again
   Linear(ch2 * (F//4), model_size) → Dropout(0.5)
 
-Stack layout (jongwook transcriber.py lines 53–83):
+Stack layout:
   onset_stack    : ConvStack → BiLSTM → Linear → Sigmoid
   offset_stack   : ConvStack → BiLSTM → Linear → Sigmoid
   frame_stack    : ConvStack → Linear → Sigmoid   (no BiLSTM)
@@ -34,13 +43,7 @@ Stack layout (jongwook transcriber.py lines 53–83):
                    input = cat(onset.detach(), offset.detach(), frame_acoustic)
                    dim = output_features × 3
   velocity_stack : ConvStack → Linear              (NO sigmoid — raw MSE target)
-
-Papers:
-  Hawthorne et al. 2018a §3 — base architecture.
-  jongwook/onsets-and-frames — all 5 improvements.
-  Kim, Kwon & Nam 2025 D3RM — offset head necessity.
 """
-
 from __future__ import annotations
 
 from typing import Dict

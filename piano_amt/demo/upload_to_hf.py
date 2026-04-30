@@ -1,3 +1,36 @@
+"""
+upload_demo_package.py — Upload the demo checkpoint and assets package(Hugging Face).
+
+Purpose:
+  This file uploads the public demo package to a model repository so the demo
+  notebook can download the checkpoint, prepared audio examples, label files,
+  original MIDI files, and sample manifest from one consistent location.
+
+Design:
+  - create_repo() creates the target model repository if it does not already
+    exist.
+  - upload_demo_package() uploads the trained checkpoint to checkpoints/best.pt.
+  - The prepared demo_assets folder is uploaded as a complete asset directory.
+  - sample_manifest.json is uploaded to demo/sample_manifest.json so the demo
+    loader can find prepared examples.
+  - An optional README can be uploaded when provided.
+  - The --private flag controls whether the target repository is created as
+    private.
+
+Usage:
+    python upload_demo_package.py \\
+        --repo_id username/repo-name \\
+        --checkpoint /path/to/best.pt \\
+        --demo_assets /path/to/demo_assets \\
+        --manifest /path/to/sample_manifest.json \\
+        --readme /path/to/README.md
+
+Outputs:
+  - Uploaded checkpoint file.
+  - Uploaded demo asset folder.
+  - Uploaded sample manifest.
+  - Optional uploaded README.
+"""
 from __future__ import annotations
 
 import argparse

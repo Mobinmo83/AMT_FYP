@@ -2,13 +2,28 @@
 audio.py — Audio loading and log-mel spectrogram computation.
 
 Design:
-  - torchaudio for all I/O and DSP (no librosa dependency).
-  - log(mel + 1e-9) formula from jongwook/onsets-and-frames src/mel.py.
-  - Module-level singleton _mel_transform to avoid re-building filterbanks.
+  - torchaudio for all audio loading, resampling, mono conversion, and DSP.
+  - Converts each audio file to a fixed 16 kHz mono waveform before feature
+    extraction.
+  - Computes 229-bin log-mel spectrograms using the project-wide constants
+    from constants.py.
+  - Uses log(mel + 1e-9) compression for numerical stability and consistent
+    model input scaling.
+  - Module-level singleton _mel_transform avoids re-building filterbanks on
+    repeated calls.
+  - Mel transforms are cached per device so CPU and CUDA preprocessing can
+    coexist in the same process.
 
-Papers:
-  Hawthorne et al. 2018a §3: N_MELS=229, SR=16000, HOP=512, FMIN=30, FMAX=8000.
-  jongwook/onsets-and-frames src/mel.py: log(mel + 1e-9) formula.
+Public API:
+  load_audio()             — load audio from disk, resample, and convert to mono
+  wav_to_log_mel()         — waveform tensor → log-mel spectrogram
+  load_audio_as_log_mel()  — convenience wrapper for inference/demo use
+  audio_samples_to_frames() — audio sample count → mel frame count
+  frames_to_audio_samples() — mel frame count → audio sample count
+
+Outputs:
+  waveform: Tensor of shape (1, N_samples)
+  log_mel:  Tensor of shape (N_MELS, T_frames) = (229, T)
 """
 
 from __future__ import annotations

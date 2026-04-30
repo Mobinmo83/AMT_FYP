@@ -5,16 +5,25 @@ Provides two public functions:
   rolls_to_note_events() — rolls → List[NoteEvent] (used by evaluate/metrics.py)
   rolls_to_midi_file()   — rolls → save .mid to disk
 
-The decoding algorithm follows Hawthorne 2018a §4:
+The decoding algorithm converts model output rolls into symbolic note events:
   A note starts when onset_roll[f, key] > onset_threshold.
   It ends when frame_roll[f, key] drops below frame_threshold.
   Open notes at end-of-clip are closed at the last frame.
   Minimum note duration = 16 ms (1 frame at 31.25 fps ≈ 32 ms → 16 ms guard).
 
 This file wraps src/midi.py rolls_to_midi() and adds the note-event list
-extraction needed by mir_eval.
+extraction needed by the evaluation pipeline.
 
-NoteEvent format (mir_eval compatible):
+Inputs:
+  onset_roll    — (T, 88) onset probabilities
+  frame_roll    — (T, 88) frame probabilities
+  velocity_roll — (T, 88) velocity predictions
+
+Outputs:
+  - List[NoteEvent] for metric computation
+  - Optional .mid file for qualitative listening, inspection, and demo use
+
+NoteEvent format:
   (onset_sec, offset_sec, pitch_midi, velocity_int)
 """
 

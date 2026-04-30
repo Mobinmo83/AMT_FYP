@@ -1,3 +1,31 @@
+"""
+demo model loading — checkpoint download, model initialisation, and summary helpers.
+
+Purpose:
+  This file handles the model-loading stage of the demo pipeline. It resolves
+  the demo checkpoint, downloads it into the local demo checkpoint directory
+  when needed, restores the OnsetsAndFrames model weights, moves the model to
+  the selected device, and returns the model ready for inference.
+
+Design:
+  - resolve_checkpoint_path() ensures demo directories exist and retrieves the
+    configured checkpoint file into CHECKPOINT_DIR.
+  - load_demo_model() selects CUDA when available, loads the checkpoint, builds
+    the model with the configured complexity, restores weights, and switches
+    the model to evaluation mode.
+  - checkpoint_summary() returns key checkpoint metadata as a dictionary.
+  - format_checkpoint_summary() formats the same metadata for notebook or demo
+    display.
+  - maybe_torchinfo_summary() optionally creates a compact model architecture
+    summary when torchinfo is installed.
+
+Outputs:
+  - Loaded OnsetsAndFrames model ready for transcription.
+  - Checkpoint dictionary for metadata and reproducibility checks.
+  - Local checkpoint path used by the demo.
+  - Human-readable checkpoint and model summaries for display.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

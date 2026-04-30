@@ -1,18 +1,28 @@
 """
 midi.py — MIDI loading and piano-roll label encoding/decoding.
 
-Design follows Hawthorne et al. 2018a §3.1 "Label Design":
+Design:
+  - load_midi: loads a .mid/.midi file into a PrettyMIDI object.
+  - midi_to_note_events: extracts all piano-range note events and sorts them
+    by onset time.
+  - note_events_to_rolls: encodes note events into four aligned label rolls:
+    onset, frame, offset, and velocity.
+  - midi_path_to_rolls: loads a MIDI file and creates full-file or windowed
+    piano-roll tensors for dataset caching.
+  - rolls_to_midi: decodes predicted or ground-truth rolls back into a MIDI
+    object for qualitative inspection, demo output, and saved examples.
+
+Label rolls:
   - onset_roll:    1.0 for ONSET_WINDOW_FRAMES around each note onset.
   - frame_roll:    1.0 for every frame the note is sounding.
   - offset_roll:   1.0 for OFFSET_WINDOW_FRAMES around each note offset.
-                   (jongwook/onsets-and-frames offset head improvement.)
   - velocity_roll: velocity/128 at the onset frame only.
 
-All rolls have shape (n_frames, 88) where dim-1 indexes piano keys [21..108].
+All rolls have shape (n_frames, 88), where dim-1 indexes piano keys [21..108].
 
-Papers:
-  Hawthorne et al. 2018a §3.1 — label encoding scheme.
-  jongwook/onsets-and-frames — offset head improvement.
+Purpose:
+  This module provides the symbolic bridge between MIDI files, model training
+  labels, evaluation targets, and decoded MIDI outputs.
 """
 
 from __future__ import annotations
@@ -70,7 +80,6 @@ def midi_to_note_events(pm: pretty_midi.PrettyMIDI) -> List[NoteEvent]:
         pitch is in MIDI note number [21, 108].
         velocity is raw MIDI velocity [0, 127].
 
-    Paper: Hawthorne 2018a §3.1 — piano range filtering.
     """
     events: List[NoteEvent] = []
     for instrument in pm.instruments:
@@ -118,9 +127,6 @@ def note_events_to_rolls(
     Shape:
         All outputs: (n_frames, N_KEYS) = (n_frames, 88)
 
-    Papers:
-        Hawthorne 2018a §3.1: onset/frame/velocity encoding.
-        jongwook/onsets-and-frames: offset head improvement.
     """
     onset_roll    = torch.zeros(n_frames, N_KEYS, dtype=torch.float32)
     frame_roll    = torch.zeros(n_frames, N_KEYS, dtype=torch.float32)

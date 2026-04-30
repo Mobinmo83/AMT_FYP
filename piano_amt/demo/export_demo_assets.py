@@ -1,3 +1,37 @@
+"""
+export_demo_assets.py — Export a small MAESTRO subset for the public demo.
+
+Purpose:
+  This file builds the demo asset package used by the notebook. It selects
+  named MAESTRO examples, copies their audio and original MIDI files, extracts
+  cached label rolls, and writes a sample manifest that the demo can load.
+
+Design:
+  - Reads the MAESTRO CSV manifest from maestro_root.
+  - Finds each requested sample by matching the provided audio or MIDI stem.
+  - Copies the source audio into the demo asset directory with a stable
+    sample_XX filename.
+  - Copies the original MIDI file for qualitative comparison and playback.
+  - Loads the existing NPZ cache and exports only the label rolls needed by
+    the demo: onset, frame, offset, and velocity.
+  - Collects basic metadata, including split, composer/title fields, duration,
+    label-frame count, note count, MIDI duration, and sustain-control summary.
+  - Writes sample_manifest.json so the demo notebook can list and load the
+    prepared examples consistently.
+
+Usage:
+    python export_demo_assets.py \\
+        --maestro_root /path/to/maestro-v3.0.0 \\
+        --cache_dir /path/to/cache \\
+        --output_dir /path/to/demo_assets \\
+        --names sample_stem_1 sample_stem_2
+
+Outputs:
+  - demo audio files
+  - demo label NPZ files
+  - original MIDI files
+  - sample_manifest.json for the notebook/demo loader
+"""
 from __future__ import annotations
 
 import argparse

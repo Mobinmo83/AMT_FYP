@@ -1,3 +1,33 @@
+"""
+demo sample loading — manifest access, uploaded audio handling, and mel preparation.
+
+Purpose:
+  This file loads the audio inputs used by the public demo. It supports both
+  prepared demo examples from the sample manifest and custom user-uploaded
+  audio files. It also converts selected audio into the log-mel tensor required
+  by the model and loads cached ground-truth label rolls when available.
+
+Design:
+  - load_sample_manifest() reads sample_manifest.json and returns an empty
+    sample list if the manifest is not present.
+  - list_demo_sample_names() exposes the available prepared examples for
+    notebook dropdowns or demo controls.
+  - resolve_demo_sample_paths() returns the audio path, label-roll path,
+    optional original MIDI path, and metadata for a selected demo sample.
+  - save_uploaded_audio() stores an uploaded file, converts it to 16 kHz mono
+    WAV, and returns the normalised audio path.
+  - audio_path_to_mel() converts any selected audio file into a contiguous
+    (229, T) log-mel tensor for full-length inference.
+  - load_ground_truth_labels() loads cached onset, frame, offset, and velocity
+    rolls for quantitative comparison.
+
+Outputs:
+  - Resolved demo sample paths and metadata.
+  - Normalised uploaded audio files in the demo upload directory.
+  - Model-ready log-mel spectrogram tensors.
+  - Ground-truth label dictionaries for evaluation and visual comparison.
+"""
+
 from __future__ import annotations
 
 import json

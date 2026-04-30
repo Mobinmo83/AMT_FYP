@@ -2,17 +2,34 @@
 dataset.py — MAESTRO dataset loading, NPZ caching, and PyTorch Dataset.
 
 Design:
-  - NPZ caching: preprocess audio+MIDI once, store on disk.
-    Strategy from jongwook/onsets-and-frames src/dataset.py.
-  - Random 640-frame crops for training.
-    jongwook src/dataset.py: MAX_SEGMENT_FRAMES=640, MAX_SEGMENT_SAMPLES=327680.
-  - MAESTRO CSV split column: "train" / "validation" / "test".
-    Hawthorne et al. 2018b §3.
+  - NPZ caching: preprocess audio+MIDI once, store on disk, and reuse on
+    later training/evaluation runs.
+  - preprocess_and_cache: loads audio, computes the log-mel spectrogram,
+    builds onset/frame/offset/velocity label rolls, and saves all arrays as
+    compressed float32 NPZ files.
+  - load_from_cache: loads cached NPZ files back into torch tensors.
+  - MAESTRODataset: reads the MAESTRO CSV split manifest, resolves audio/MIDI
+    paths, lazily creates missing cache files, and returns tensors for the
+    requested split.
+  - Random fixed-length crops are used when segment=True, with right-padding
+    for pieces shorter than the requested segment length.
+  - Full-length tensors are returned when segment=False, for evaluation or
+    inference workflows that require complete pieces.
+  - build_cache: optional utility to preprocess all files in selected splits
+    ahead of training.
 
-Papers:
-  Hawthorne 2018a §3: hyperparameters.
-  Hawthorne 2018b "MAESTRO": dataset splits.
-  jongwook/onsets-and-frames src/dataset.py: NPZ caching + crop strategy.
+Dataset item:
+  mel        — (229, T) or (229, segment_frames) log-mel spectrogram
+  onset      — (T, 88) or (segment_frames, 88) onset piano roll
+  frame      — (T, 88) or (segment_frames, 88) frame piano roll
+  offset     — (T, 88) or (segment_frames, 88) offset piano roll
+  velocity   — (T, 88) or (segment_frames, 88) velocity piano roll
+  audio_path — source audio file path
+
+Purpose:
+  This module keeps expensive preprocessing separate from model training so
+  repeated runs, tuning experiments, validation, and test evaluation can reuse
+  the same cached features and labels consistently.
 """
 
 from __future__ import annotations
@@ -92,10 +109,6 @@ def preprocess_and_cache(
         audio_path: Path to audio file.
         midi_path:  Path to MIDI file.
         cache_path: Destination .npz file path.
-
-    Papers:
-        jongwook/onsets-and-frames src/dataset.py: NPZ caching strategy.
-        Hawthorne 2018a §3.1: label encoding.
     """
     cache_path = Path(cache_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,9 +196,6 @@ class MAESTRODataset(Dataset):
         max_files:    If set, limit dataset to this many files (for quick tests).
         seed:         Random seed for reproducible crops.
 
-    Papers:
-        Hawthorne 2018b "MAESTRO" §3: dataset splits and CSV format.
-        jongwook/onsets-and-frames: NPZ caching + 640-frame crop strategy.
     """
 
     def __init__(
@@ -291,9 +301,6 @@ class MAESTRODataset(Dataset):
 
         Returns:
             Dict with the same keys, all cropped/padded to MAX_SEGMENT_FRAMES.
-
-        Papers:
-            jongwook/onsets-and-frames src/dataset.py: 640-frame random crop.
         """
         mel = data["mel"]         # (229, T)
         T   = mel.shape[1]
@@ -339,8 +346,6 @@ def build_cache(
         cache_dir:    Directory to store NPZ cache files.
         splits:       Tuple of split names to process.
 
-    Papers:
-        jongwook/onsets-and-frames src/dataset.py: NPZ caching strategy.
     """
     maestro_root = Path(maestro_root)
     cache_dir    = Path(cache_dir)

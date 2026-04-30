@@ -1,3 +1,34 @@
+"""
+demo decoder configuration — preset definitions for baseline and advanced decoding.
+
+Purpose:
+  This file defines the editable decoder presets used by the public demo.
+  Each preset controls how prediction rolls are converted into note events
+  and MIDI output after model inference.
+
+Design:
+  - AdvancedDecoderConfig stores the decode thresholds, metadata, and
+    post-processing toggles in one frozen dataclass.
+  - Field names match the advanced decoder function arguments, so presets can
+    be passed directly into the final decoding path without alias conversion.
+  - ADVANCED_DECODER_PRESETS provides named demo modes for baseline decoding,
+    efficient post-processing, quality post-processing, and optional
+    single-method explanations.
+  - make_decoder_config() loads a preset and applies optional overrides for
+    notebook controls or interactive demo settings.
+  - config_table_dict() converts a config into a plain dictionary for display.
+
+Demo modes:
+  - baseline: tuned baseline decoder with no post-processing.
+  - efficient_m3_m4: minimum note duration + velocity-aware duplicate removal.
+  - quality_m2_m3_m4: frame smoothing + minimum duration + duplicate removal.
+  - m2_only / m3_only / m4_only: single-method modes for live explanation.
+
+Outputs:
+  - Decoder configuration objects used by inference, MIDI generation, plots,
+    and demo result summaries.
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace

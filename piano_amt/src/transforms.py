@@ -1,18 +1,28 @@
 """
-transforms.py — Data augmentation transforms for piano AMT training.
+midi.py — MIDI loading and piano-roll label encoding/decoding.
 
 Design:
-  - All transforms operate on Dict[str, Tensor] batches (same format as
-    MAESTRODataset.__getitem__ returns).
-  - RandomPitchShift: shifts both mel bins AND label columns simultaneously
-    to preserve alignment.  From KinWaiCheuk/ICPR2020 augmentation strategy.
-  - SpecAugment-style masking: time and frequency masking on mel only (or
-    jointly on mel + labels for time masking).
-    Paper: KinWaiCheuk/ICPR2020 github for generalisation augmentation.
+  - load_midi: loads a .mid/.midi file into a PrettyMIDI object.
+  - midi_to_note_events: extracts all piano-range note events and sorts them
+    by onset time.
+  - note_events_to_rolls: encodes note events into four aligned label rolls:
+    onset, frame, offset, and velocity.
+  - midi_path_to_rolls: loads a MIDI file and creates full-file or windowed
+    piano-roll tensors for dataset caching.
+  - rolls_to_midi: decodes predicted or ground-truth rolls back into a MIDI
+    object for qualitative inspection, demo output, and saved examples.
 
-Papers:
-  KinWaiCheuk/ICPR2020: RandomPitchShift ±1 semitone, SpecAugment masking.
-  Hawthorne 2018a §3: BINS_PER_SEMITONE derived from N_MELS/N_KEYS.
+Label rolls:
+  - onset_roll:    1.0 for ONSET_WINDOW_FRAMES around each note onset.
+  - frame_roll:    1.0 for every frame the note is sounding.
+  - offset_roll:   1.0 for OFFSET_WINDOW_FRAMES around each note offset.
+  - velocity_roll: velocity/128 at the onset frame only.
+
+All rolls have shape (n_frames, 88), where dim-1 indexes piano keys [21..108].
+
+Purpose:
+  This module provides the symbolic bridge between MIDI files, model training
+  labels, evaluation targets, and decoded MIDI outputs.
 """
 
 from __future__ import annotations
@@ -94,9 +104,6 @@ class RandomPitchShift(Transform):
 
     Out-of-range bins/columns are zeroed (no wrap-around).
 
-    Source: KinWaiCheuk/ICPR2020 GitHub — pitch augmentation strategy.
-    Hawthorne 2018a §3: mel bin ↔ semitone relationship.
-
     Args:
         max_shift: Maximum pitch shift in semitones (default 1).
                    A random integer in [-max_shift, +max_shift] is sampled.
@@ -168,8 +175,6 @@ class RandomTimeMask(Transform):
     SpecAugment-style time masking applied jointly to mel and labels so that
     the model does not learn from artificially masked regions.
 
-    Source: KinWaiCheuk/ICPR2020 GitHub — SpecAugment time masking.
-
     Args:
         max_mask_frames: Maximum width of the masked time block (default 50).
         p:               Probability of applying the transform (default 0.3).
@@ -219,7 +224,6 @@ class RandomFreqMask(Transform):
     SpecAugment-style frequency masking.  Does NOT modify labels — frequency
     masking does not change which pitches are active.
 
-    Source: KinWaiCheuk/ICPR2020 GitHub — SpecAugment frequency masking.
 
     Args:
         max_mask_bins: Maximum height of the masked frequency band (default 20).

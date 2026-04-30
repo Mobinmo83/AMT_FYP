@@ -8,14 +8,25 @@ that can be toggled independently or combined for ablation studies.
 All methods preserve the original decode.py interface — the original
 rolls_to_note_events() and rolls_to_midi_file() remain untouched.
 
-Post-processing methods (ordered by recommended priority):
-  1. Onset-Conditioned Offset Estimation  (modifies decoding logic)
+Post-processing methods (ordered by application in the decoder):
+  1. Adaptive Thresholding                (per-piece threshold tuning)
   2. Frame-Level Smoothing                (pre-processes frame roll)
-  3. Minimum Note Duration Enforcement    (adjustable MIN_DUR)
-  4. Velocity-Aware Duplicate Removal     (post-decode event filter)
-  5. Chord-Aware Onset Grouping           (post-decode event adjustment)
-  6. Adaptive Thresholding                (per-piece threshold tuning)
+  3. Onset-Conditioned Offset Estimation  (modifies decoding logic)
+  4. Minimum Note Duration Enforcement    (adjustable MIN_DUR)
+  5. Velocity-Aware Duplicate Removal     (post-decode event filter)
+  6. Chord-Aware Onset Grouping           (post-decode event adjustment)
   7. Sustain Pedal-Aware Offset Extension (extends offsets in pedal regions)
+
+Design:
+  - advanced_rolls_to_note_events() returns a List[NoteEvent] for evaluation.
+  - advanced_rolls_to_midi_file() decodes the same events and writes a .mid file.
+  - Each method is controlled by explicit keyword arguments, making validation
+    sweeps and ablation studies reproducible from notebooks or scripts.
+  - The decoder starts from the same onset/frame/offset/velocity model outputs
+    as the baseline decoder, then applies only the selected post-processing
+    stages.
+  - Event-level post-processing is kept separate from the neural model, so the
+    same checkpoint can be evaluated under many decoding configurations.
 
 Usage:
     from models.onsets_frames.decode_advanced import advanced_rolls_to_note_events
@@ -28,19 +39,16 @@ Usage:
         fps=31.25,
         onset_threshold=0.5,
         frame_threshold=0.5,
+        offset_threshold=0.5,
         # Post-processing toggles:
-        use_onset_conditioned_offset=True,   # Method 1
+        use_onset_conditioned_offset=True,   # Method 3
         use_frame_smoothing=True,            # Method 2
-        min_note_duration_ms=50.0,           # Method 3 (default was 16ms)
-        use_duplicate_removal=True,          # Method 4
-        use_chord_grouping=True,             # Method 5
-        use_adaptive_thresholds=False,       # Method 6
+        min_note_duration_ms=50.0,           # Method 4
+        use_duplicate_removal=True,          # Method 5
+        use_chord_grouping=True,             # Method 6
+        use_adaptive_thresholds=False,       # Method 1
         use_pedal_extension=False,           # Method 7
     )
-
-Papers:
-  Hawthorne et al. 2018a §4 — base decoding algorithm.
-  jongwook/onsets-and-frames — offset head improvements.
 """
 
 from __future__ import annotations

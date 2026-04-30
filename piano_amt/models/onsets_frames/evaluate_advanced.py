@@ -3,12 +3,37 @@ models/onsets_frames/evaluate_advanced.py — Advanced evaluation harness.
 
 Identical to evaluate.py but uses decode_advanced.py for post-processing.
 This allows running the original and advanced evaluations side by side
-from different notebooks without modifying any original code.
+from different notebooks without modifying any original evaluation code.
 
 Key difference from evaluate.py:
-  - Uses advanced_rolls_to_note_events() instead of rolls_to_note_events()
+  - Uses advanced_rolls_to_note_events() instead of the standard decoder
   - Accepts all post-processing toggles as parameters
+  - Computes note-level metrics from the post-processed decoded events
+  - Computes frame metrics using the relevant frame-level pre-processing view
   - Saves results to eval_<split>_<config_name>/ directories
+  - Records the active post-processing configuration in summary_metrics.json
+
+Evaluation strategy:
+  - Each piece is processed as a SINGLE full-length forward pass
+    (no windowing, no chunking), giving the BiLSTM complete bidirectional
+    context over the entire performance.
+  - The model outputs onset, frame, offset, and velocity rolls.
+  - The advanced decoder then applies the selected post-processing methods
+    before converting predictions into note events.
+  - Event-level supplementary error analysis is computed from the decoded
+    note events so offset MAE, chord completeness, and duplicate note rate
+    reflect the chosen post-processing configuration.
+  - cuDNN is disabled for LSTM layers during evaluation to support very long
+    full-piece sequences.
+
+Post-processing options:
+  - onset-conditioned offset estimation
+  - frame-level smoothing
+  - minimum note duration filtering
+  - velocity-aware duplicate removal
+  - chord-aware onset grouping
+  - adaptive thresholding
+  - sustain-pedal-style offset extension
 
 Usage:
     python -m models.onsets_frames.evaluate_advanced \\
@@ -36,6 +61,13 @@ Usage:
             use_duplicate_removal=True,
             use_chord_grouping=True,
         )
+
+Outputs (written into the run directory beside the checkpoint):
+    eval_<split>_<config_name>/
+        summary_metrics.json     ← mean metrics, protocol, environment, config
+        per_file_metrics.json    ← per-file metric breakdown
+        plots/                   ← piano-roll comparison images (if --save_plots)
+        midi_samples/            ← decoded MIDI files (if --save_midi)
 """
 
 from __future__ import annotations

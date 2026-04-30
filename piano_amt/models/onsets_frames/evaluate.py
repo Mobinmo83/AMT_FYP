@@ -5,14 +5,14 @@ Runs the model on the validation or test split, computes all AMT metrics via
 evaluate/metrics.py, saves per-file results, summary JSON, and piano-roll plots.
 
 Evaluation strategy:
-    Matches both Magenta and jongwook/onsets-and-frames exactly:
-    each piece is processed as a SINGLE full-length forward pass
+    Each piece is processed as a SINGLE full-length forward pass
     (no windowing, no chunking), giving the BiLSTM complete
     bidirectional context over the entire performance.
 
-    Magenta README: "validation/test examples containing full pieces"
-    jongwook evaluate.py: sequence_length=None → full piece in one pass
-    Hawthorne 2018a §4: evaluation on complete test recordings
+    Full-length inference is used so that evaluation matches the final
+    transcription setting: the model receives the complete cached mel
+    spectrogram for each piece and produces complete onset, frame, offset,
+    and velocity predictions in one pass.
 
     cuDNN is disabled for LSTM layers during evaluation to support
     arbitrarily long sequences (full MAESTRO pieces can exceed 50k frames).
@@ -20,6 +20,14 @@ Evaluation strategy:
 
     Requires A100 (40/80GB) or H100 (80GB) for longest MAESTRO pieces.
     Not suitable for T4 (16GB) on pieces longer than ~4 minutes.
+
+Metrics:
+    - Frame precision, recall, F1, and accuracy.
+    - Note precision, recall, and F1.
+    - Note-with-offset precision, recall, and F1.
+    - Note-with-offset-and-velocity precision, recall, and F1.
+    - Supplementary error analysis including onset MAE, offset MAE,
+      chord completeness, and duplicate note rate.
 
 Usage:
     python -m models.onsets_frames.evaluate \\
@@ -38,7 +46,6 @@ Outputs (written into the run directory beside the checkpoint):
         plots/                   ← piano-roll comparison images (if --save_plots)
         midi_samples/            ← decoded MIDI files (if --save_midi)
 """
-
 from __future__ import annotations
 
 import argparse

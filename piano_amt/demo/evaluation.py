@@ -1,3 +1,35 @@
+"""
+demo evaluation — single-example metrics and display tables for demo predictions.
+
+Purpose:
+  This file evaluates a demo transcription against cached ground-truth rolls
+  when ground truth is available. It converts predicted and reference rolls into
+  note events, computes the main AMT metrics, runs supplementary error analysis,
+  and formats the results into notebook-friendly tables.
+
+Design:
+  - prediction_to_note_events() is used to decode model predictions with the
+    selected demo decoder configuration.
+  - gt_rolls_to_note_events() is used to decode cached ground-truth label rolls
+    for comparison.
+  - note_event_metrics() computes note, note+offset, note+offset+velocity, and
+    note-count metrics from decoded events.
+  - Frame metrics follow the same frame-level preprocessing view as the
+    advanced evaluator, including smoothing and adaptive thresholds when enabled.
+  - evaluate_prediction_vs_gt() returns metrics, error analysis, failure
+    summary, protocol details, decoder metadata, and decoded events.
+  - compare_decoder_modes() evaluates the same prediction under multiple
+    decoder presets for side-by-side comparison.
+
+Outputs:
+  - Main metric table: Note, Note+offset, Note+offset+velocity, and Frame scores.
+  - Supplementary table: matched/missed/extra notes, timing MAE, chord
+    completeness, and duplicate note rate.
+  - Decoder comparison tables for baseline, efficient, quality, or custom
+    configurations.
+  - Styled pandas tables for clean display inside the demo notebook.
+"""
+
 from __future__ import annotations
 
 from collections import defaultdict

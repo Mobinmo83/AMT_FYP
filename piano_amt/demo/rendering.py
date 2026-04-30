@@ -1,3 +1,35 @@
+"""
+demo visualisation — MIDI rendering, audio synthesis, and note-event plots.
+
+Purpose:
+  This file provides the visual and audio output utilities used by the public
+  demo. It converts decoded MIDI or note events into plots, synthesised audio,
+  comparison figures, and inline Visual MIDI displays for notebook use.
+
+Design:
+  - MIDI synthesis utilities render PrettyMIDI objects to waveform audio using
+    the configured piano sound and available soundfont paths.
+  - save_audio_wav() and synthesize_and_save() write demo playback audio to
+    disk.
+  - MIDI parsing helpers convert PrettyMIDI files or objects into DemoNoteEvent
+    lists for plotting and comparison.
+  - plot_midi_event_bars() displays decoded notes as duration-aware horizontal
+    bars, with velocity shown by colour.
+  - plot_event_bar_comparison() compares reference and predicted MIDI events in
+    two aligned panels with shared velocity colouring.
+  - plot_event_roll_diff() creates a qualitative occupancy-difference view
+    showing overlap, extra predictions, and missed reference notes.
+  - plot_midi_notes_velocity() visualises a saved MIDI file directly.
+  - render_visual_midi() displays an inline Visual MIDI view in Colab/Jupyter
+    while handling common notebook compatibility issues.
+
+Outputs:
+  - WAV files for listening to predicted or reference MIDI.
+  - Publication/demo-style MIDI note plots.
+  - Reference-vs-prediction comparison figures.
+  - Qualitative piano-roll occupancy difference figures.
+  - Inline Visual MIDI renderings for interactive notebook inspection.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,9 +54,7 @@ from demo.inference import DemoNoteEvent
 from src.constants import FRAMES_PER_SECOND
 
 
-# ---------------------------------------------------------------------------
-# Public demo constants
-# ---------------------------------------------------------------------------
+
 
 DEMO_FPS = float(FRAMES_PER_SECOND)
 PIANO_LOW = 21
@@ -39,7 +69,6 @@ PIANO_PROGRAMS = {
 }
 
 
-# Suppress common Visual MIDI / Bokeh warning spam globally for demo notebooks.
 try:
     from bokeh.util.warnings import BokehDeprecationWarning
 
@@ -60,7 +89,6 @@ def _velocity_to_midi_value(v) -> int:
 
 
 
-# Audio / MIDI synthesis helpers
 
 
 def clone_pretty_midi(pm: pretty_midi.PrettyMIDI) -> pretty_midi.PrettyMIDI:
@@ -152,10 +180,6 @@ def synthesize_and_save(
     y = synthesize_pretty_midi(pm, sr=sr, piano_sound=piano_sound)
     return save_audio_wav(y, output_path, sr=sr)
 
-
-# ---------------------------------------------------------------------------
-# Generic conversion helpers
-# ---------------------------------------------------------------------------
 
 def _to_numpy(x):
     if x is None:
@@ -762,9 +786,7 @@ def plot_event_roll_diff(
 
 
 
-# ---------------------------------------------------------------------------
-# Original MIDI / sustain visualisation
-# ---------------------------------------------------------------------------
+
 def plot_midi_notes_velocity(
     midi_path: str | Path,
     title: str = "MIDI: notes and velocity",

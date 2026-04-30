@@ -2,18 +2,36 @@
 dataloader.py — DataLoader construction and collation for piano AMT training.
 
 Design:
-  - piano_amt_collate: custom collate that stacks tensors and preserves
+  - piano_amt_collate: custom collate that stacks tensor fields and preserves
     audio_path as List[str].
-  - get_dataloader: single entry-point that builds Dataset + DataLoader with
-    training/validation/test settings.
+  - get_dataloader: single entry-point that builds MAESTRODataset + DataLoader
+    with split-specific training, validation, and test settings.
   - _AugmentedDataset: thin wrapper that applies transforms AFTER __getitem__
-    (keeps MAESTRODataset transform-free for caching purposes).
+    so MAESTRODataset remains transform-free and cache-compatible.
   - sliding_windows: inference utility for segmenting a full spectrogram into
-    overlapping/non-overlapping windows.
+    overlapping or non-overlapping windows.
 
-Papers:
-  jongwook/onsets-and-frames src/dataset.py: batch_size=8, num_workers=2.
-  Hawthorne 2018a §3: training/validation split semantics.
+Training behaviour:
+  - Training uses random fixed-length spectrogram crops, shuffling, drop_last,
+    and optional augmentation.
+  - Validation uses longer fixed-length crops without augmentation, preserving
+    a stable held-out evaluation path during training.
+  - Test loading is left unsegmented so full-piece evaluation/inference can be
+    handled separately by the evaluation pipeline.
+
+Outputs:
+  DataLoader batches are dictionaries with:
+    mel        — FloatTensor (B, 229, T)
+    onset      — FloatTensor (B, T, 88)
+    frame      — FloatTensor (B, T, 88)
+    offset     — FloatTensor (B, T, 88)
+    velocity   — FloatTensor (B, T, 88)
+    audio_path — List[str] length B
+
+Usage:
+  Use get_dataloader() from train.py or notebooks to construct the required
+  split loader. Use sliding_windows() during inference when a full-length
+  spectrogram needs to be divided into model-sized windows.
 """
 
 from __future__ import annotations
@@ -153,9 +171,7 @@ def get_dataloader(
     Returns:
         torch.utils.data.DataLoader ready to iterate.
 
-    Papers:
-        jongwook/onsets-and-frames: batch_size=8, num_workers=2.
-        Hawthorne 2018a §3: train/validation/test split semantics.
+
     """
     if cache_dir is None:
         cache_dir = Path(maestro_root) / "cache"

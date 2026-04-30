@@ -1,3 +1,30 @@
+"""
+demo_config.py — Central configuration for the public piano AMT demo.
+
+Purpose:
+  This file stores the demo-wide settings used for checkpoint loading,
+  model initialisation, audio handling, sample assets, and output directory
+  management.
+
+Design:
+  - Hugging Face settings define where the demo checkpoint is downloaded from.
+  - Model and audio settings define the checkpoint-compatible model complexity
+    and expected sample rate.
+  - Working directory paths define where Colab/Jupyter stores checkpoints,
+    uploaded audio, temporary files, MIDI outputs, plots, HTML renders, and
+    generated audio.
+  - Repository paths point to the demo folder, demo assets, and sample manifest.
+  - Default soundfont paths are listed for MIDI-to-audio rendering when
+    FluidSynth is available.
+  - ensure_demo_dirs() creates all required runtime directories before the demo
+    downloads checkpoints, saves predictions, renders MIDI, or stores uploads.
+
+Outputs:
+  - Consistent Path objects used by the demo notebooks and helper modules.
+  - Runtime folders for checkpoints, uploads, plots, MIDI files, HTML files,
+    rendered audio, and temporary files.
+"""
+
 from __future__ import annotations
 
 import os
