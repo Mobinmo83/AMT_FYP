@@ -74,7 +74,7 @@ from scipy.ndimage import gaussian_filter1d
 
 
 # ---------------------------------------------------------------------------
-# Method 2: Frame-Level Smoothing
+# Frame-Level Smoothing
 # ---------------------------------------------------------------------------
 
 def smooth_frame_roll(
@@ -153,7 +153,7 @@ def smooth_frame_roll(
 
 
 # ---------------------------------------------------------------------------
-# Method 6: Adaptive Thresholding
+# Adaptive Thresholding
 # ---------------------------------------------------------------------------
 
 def compute_adaptive_thresholds(
@@ -199,7 +199,7 @@ def compute_adaptive_thresholds(
 
 
 # ---------------------------------------------------------------------------
-# Advanced decoding with Method 1 (Onset-Conditioned Offset) and Method 3
+# Advanced decoding with Onset-Conditioned Offset and Minimum Note Duration
 # ---------------------------------------------------------------------------
 
 def advanced_decode_notes(
@@ -314,7 +314,7 @@ def advanced_decode_notes(
 
 
 # ---------------------------------------------------------------------------
-# Method 4: Velocity-Aware Duplicate Removal
+# Velocity-Aware Duplicate Removal
 # ---------------------------------------------------------------------------
 
 def remove_duplicate_notes(
@@ -374,7 +374,7 @@ def remove_duplicate_notes(
 
 
 # ---------------------------------------------------------------------------
-# Method 5: Chord-Aware Onset Grouping
+# Chord-Aware Onset Grouping
 # ---------------------------------------------------------------------------
 
 def group_chord_onsets(
@@ -446,7 +446,7 @@ def group_chord_onsets(
 
 
 # ---------------------------------------------------------------------------
-# Method 7: Sustain Pedal-Aware Offset Extension
+# Sustain Pedal-Aware Offset Extension
 # ---------------------------------------------------------------------------
 
 def extend_offsets_for_pedal(
