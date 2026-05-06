@@ -209,6 +209,7 @@ The remaining cells call `models.onsets_frames.evaluate_advanced.run_advanced_ev
 
 
 ### Output directory layout produced by the notebook
+```text
 runs/<run_name>/
 ├── checkpoints/
 │   └── best.pt
@@ -218,6 +219,7 @@ runs/<run_name>/
 └── eval_test_<config_name>/
 ├── summary_metrics.json
 └── per_file_metrics.json
+```
 
 `<config_name>` is whatever string the notebook passes as `config_name=` (e.g. `exp0_baseline_validation`, `exp1_m3_min_dur_validation`, `m2_m3_m4_test`). Setting `save_midi=True` writes decoded `.mid` files for the first 20 pieces into `midi_samples/`; `save_plots=True` writes piano-roll comparison PNGs for the first 10 pieces into `plots/`.
 
@@ -274,6 +276,7 @@ CONFIG = {
 The trainer restores model weights, optimizer state, scheduler state, AMP scaler state, current epoch, global step, best validation loss, and cumulative training time, and then continues until the `epochs` value in `CONFIG`.
 
 ### Run-directory layout written by `RunDirectory`
+```text
 runs/<run_name>/
 ├── config.json                   # CONFIG snapshot, written once at run start
 ├── metrics.json                  # per-epoch lists (epoch, train_loss, val_loss,
@@ -286,6 +289,7 @@ runs/<run_name>/
 │   └── epoch_NNN_valloss_X.XXXX.pt   # one per new best (audit trail)
 └── plots/
 └── loss_curves_epochNNN.png
+```
 
 ---
 
