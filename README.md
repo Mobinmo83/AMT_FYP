@@ -1,6 +1,6 @@
 # Piano AMT — Onsets & Frames + decoder post-processing 
 
-A PyTorch piano transcription pipeline built on the *Onsets and Frames* model (Hawthorne et al., 2018, 2019) and trained on MAESTRO v3.0.0 (Hawthorne et al., 2019), with a controlled study of decoder-stage post-processing methods. Solo piano audio in → MIDI out: any input audio is resampled to 16 kHz mono, converted to a 229-bin log-mel spectrogram at 31.25 fps, fed through a four-head CNN + BiLSTM that predicts onset, frame, offset, and velocity rolls over the 88 piano keys, and decoded into note events. The repository accompanies a final-year undergraduate dissertation; the report itself contains the methodology, related work, and full results discussion. This README serves both as the **project overview** and as a **runbook**. 
+A PyTorch piano transcription pipeline built on the *Onsets and Frames* model (Hawthorne et al., 2018, 2019) and trained on MAESTRO v3.0.0 (Hawthorne et al., 2019), with a controlled study of decoder-stage post-processing methods. Solo piano audio in → MIDI out: any input audio is resampled to 16 kHz mono, converted to a 229-bin log-mel spectrogram at 31.25 fps, fed through a four-head CNN + BiLSTM that predicts onset, frame, offset, and velocity rolls over the 88 piano keys, and decoded into note events. The repository accompanies a final-year undergraduate dissertation; the report itself contains the methodology, related work, and full results discussion. This README serves as both the project overview and the runbook.
 
 ---
 
