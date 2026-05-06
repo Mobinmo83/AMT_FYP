@@ -1,6 +1,11 @@
 # Piano AMT — Onsets & Frames + decoder post-processing 
 
-**A PyTorch piano transcription pipeline built on the *Onsets and Frames* model (Hawthorne et al., 2018, 2019) and trained on MAESTRO v3.0.0 (Hawthorne et al., 2019), with a controlled study of decoder-stage post-processing methods.** Solo piano audio in → MIDI out: any input audio is resampled to 16 kHz mono, converted to a 229-bin log-mel spectrogram at 31.25 fps, fed through a four-head CNN + BiLSTM that predicts onset, frame, offset, and velocity rolls over the 88 piano keys, and decoded into note events. The repository accompanies a final-year undergraduate dissertation; the report itself contains the methodology, related work, and full results discussion. This README serves both as the **project overview** and as a **runbook**. 
+[![Open Demo in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Mobinmo83/AMT_FYP/blob/main/piano_amt/notebooks/demo-notebook/ONSETS_AND_FRAMES_PIANO_AMT_DEMO.ipynb)
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-checkpoint%20%2B%20demo%20assets-yellow)](https://huggingface.co/Mobinmo83/piano-amt-demo)
+[![Python](https://img.shields.io/badge/Python-3.x-blue)]()
+[![PyTorch](https://img.shields.io/badge/PyTorch-AMT-red)]()
+
+A PyTorch piano transcription pipeline built on the *Onsets and Frames* model (Hawthorne et al., 2018, 2019) and trained on MAESTRO v3.0.0 (Hawthorne et al., 2019), with a controlled study of decoder-stage post-processing methods. Solo piano audio in → MIDI out: any input audio is resampled to 16 kHz mono, converted to a 229-bin log-mel spectrogram at 31.25 fps, fed through a four-head CNN + BiLSTM that predicts onset, frame, offset, and velocity rolls over the 88 piano keys, and decoded into note events. The repository accompanies a final-year undergraduate dissertation; the report itself contains the methodology, related work, and full results discussion. This README serves both as the **project overview** and as a **runbook**. 
 
 ---
 
